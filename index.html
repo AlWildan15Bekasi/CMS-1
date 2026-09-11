@@ -173,7 +173,7 @@
             <div class="space-y-5">
                 <div class="relative">
                     <i class="fas fa-fingerprint absolute left-5 top-1/2 transform -translate-y-1/2 text-neoncyan dark:text-neoncyan text-blue-500"></i>
-                    <input type="text" id="login-username" placeholder="Username" class="w-full pl-12 pr-5 py-3 input-cyber text-center tracking-widest uppercase">
+                    <input type="text" id="login-username" placeholder="Username (Admin/Guru)" class="w-full pl-12 pr-5 py-3 input-cyber text-center tracking-widest uppercase">
                 </div>
                 <div class="relative">
                     <i class="fas fa-lock absolute left-5 top-1/2 transform -translate-y-1/2 text-neoncyan dark:text-neoncyan text-blue-500"></i>
@@ -1095,28 +1095,37 @@
             btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> AUTHENTICATING...'; btn.disabled = true;
             
             try {
-                // Check Admin Table First
+                // Fetch all admins and teachers to do a case-insensitive check
                 const { data: adminData, error: adminErr } = await supabaseClient
                     .from('akun_admin')
-                    .select('nama_lengkap')
-                    .eq('admin_id', usernameInput)
-                    .eq('password', passwordInput)
-                    .maybeSingle();
+                    .select('admin_id, nama_lengkap, password');
+
+                const { data: guruData, error: guruErr } = await supabaseClient
+                    .from('master_guru')
+                    .select('username, nama_guru, password');
 
                 let namaUser = "";
                 
+                // Case insensitive check for Admin
                 if (adminData) {
-                    namaUser = adminData.nama_lengkap;
-                } else {
-                    // Check Teacher Table
-                    const { data: guruData, error: guruErr } = await supabaseClient
-                        .from('master_guru')
-                        .select('nama_guru')
-                        .eq('username', usernameInput)
-                        .eq('password', passwordInput)
-                        .maybeSingle();
-                        
-                    if (guruData) namaUser = guruData.nama_guru;
+                    const matchedAdmin = adminData.find(a => 
+                        a.admin_id.toLowerCase() === usernameInput.toLowerCase() && 
+                        a.password === passwordInput
+                    );
+                    if (matchedAdmin) {
+                        namaUser = matchedAdmin.nama_lengkap;
+                    }
+                }
+
+                // Case insensitive check for Guru (if not admin)
+                if (!namaUser && guruData) {
+                    const matchedGuru = guruData.find(g => 
+                        g.username && g.username.toLowerCase() === usernameInput.toLowerCase() && 
+                        g.password === passwordInput
+                    );
+                    if (matchedGuru) {
+                        namaUser = matchedGuru.nama_guru;
+                    }
                 }
 
                 if(namaUser) {
