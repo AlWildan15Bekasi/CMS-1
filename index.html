@@ -1870,7 +1870,9 @@
         }        
         
         async function submitManualScore() {
-            const title = document.getElementById('input-score-title').innerText, type = document.getElementById('input-score-type').value, period = document.getElementById('input-score-subcontext').value;
+            const title = document.getElementById('input-score-title').innerText;
+            const type = document.getElementById('input-score-type').value; 
+            const period = document.getElementById('input-score-subcontext').value;
             let scoresArr = [];
             
             const rows = document.querySelectorAll('#input-score-body > div');
@@ -1878,22 +1880,42 @@
                 let name = r.querySelector('.inpscore_name')?.value; 
                 let val = r.querySelector('.inpscore_val')?.value; 
                 let kom = r.querySelector('.inpscore_kom')?.value;
+                
                 if(name && val) { 
-                    // REVISI 1: Sekarang JS akan mengangkut data APAPUN tanpa membeda-bedakan tipe formnya.
-                    scoresArr.push({ nama_penilaian_periode: title, nama_guru: name, skor: val, komentar: kom }); 
+                    // BUNGKUS PAKET SESUAI GUDANG TUJUANNYA
+                    if (type === 'Additional') {
+                        scoresArr.push({ nama_penilaian_periode: title, nama_guru: name, skor: val, komentar: kom }); 
+                    } else if (type === 'LeaderEvent') {
+                        scoresArr.push({ nama_event: title, pic_guru: name, skor: val, komentar: kom }); 
+                    } else if (type === 'LeaderComm') {
+                        scoresArr.push({ tipe_komisi: title, pic_guru: name, skor: val, komentar: kom }); 
+                    }
                 }
             });
 
             if(scoresArr.length > 0) { 
-                const btn = document.getElementById('btn-submit-score'); btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> SAVING...'; btn.disabled = true;
+                const btn = document.getElementById('btn-submit-score'); 
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> SAVING...'; 
+                btn.disabled = true;
                 
                 try {
-                    // REVISI 2: Menggunakan UPSERT! (Jika data belum ada di-insert, jika sudah ada di-update)
-                    const { error } = await supabaseClient.from('log_additional_score').upsert(scoresArr);
+                    // TENTUKAN ALAMAT GUDANG (TABEL SUPABASE) BERDASARKAN TIPE
+                    let targetTable = '';
+                    if (type === 'Additional') targetTable = 'log_additional_score';
+                    else if (type === 'LeaderEvent') targetTable = 'scoring_event';
+                    else if (type === 'LeaderComm') targetTable = 'scoring_commission';
+
+                    // KIRIM PAKAI JURUS UPSERT
+                    const { error } = await supabaseClient.from(targetTable).upsert(scoresArr);
                     
                     if(!error) { 
-                        showToast('Data Nilai Berhasil Tersimpan (Upserted)', 'success'); 
+                        showToast('Data Nilai Berhasil Tersimpan', 'success'); 
+                        
+                        // Segarkan tampilan sesuai tab yang lagi dibuka
                         if(type === 'Additional') loadAdditionalScoreModules(); 
+                        else if(type === 'LeaderEvent') loadLeaderEventData();
+                        else if(type === 'LeaderComm') loadLeaderCommissionData();
+                        
                     } else {
                         console.error(error);
                         showToast('Gagal menyimpan: ' + error.message, 'error'); 
@@ -1902,8 +1924,12 @@
                     console.error(err);
                 }
                 
-                btn.innerHTML = 'Submit Score'; btn.disabled = false; closeModal('input-score-modal');
-            } else { showToast('Tidak ada satupun nilai yang diinput', 'error'); }
+                btn.innerHTML = 'Submit Score'; 
+                btn.disabled = false; 
+                closeModal('input-score-modal');
+            } else { 
+                showToast('Tidak ada satupun nilai yang diinput', 'error'); 
+            }
         }
 
         async function saveEventToAPI() {
