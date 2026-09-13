@@ -1874,6 +1874,7 @@
             const type = document.getElementById('input-score-type').value; 
             const period = document.getElementById('input-score-subcontext').value;
             let scoresArr = [];
+            let updatePromises = []; // Khusus untuk Event & Comm karena harus update per baris
             
             const rows = document.querySelectorAll('#input-score-body > div');
             rows.forEach(r => {
@@ -1881,52 +1882,67 @@
                 let val = r.querySelector('.inpscore_val')?.value; 
                 let kom = r.querySelector('.inpscore_kom')?.value;
                 
-                if(name && val) { 
-                    // BUNGKUS PAKET SESUAI GUDANG TUJUANNYA
+                // FILTER SUPER KETAT: Cuma bungkus kalau nilainya beneran diisi (Bukan string kosong)
+                if(name && val && val.trim() !== "") { 
                     if (type === 'Additional') {
+                        // Harus sama persis dengan kolom master_penilaian_tambahan
                         scoresArr.push({ nama_penilaian_periode: title, nama_guru: name, skor: val, komentar: kom }); 
                     } else if (type === 'LeaderEvent') {
-                        scoresArr.push({ nama_event: title, pic_guru: name, skor: val, komentar: kom }); 
+                        // Nggak pakai array, langsung susun janji (promise) untuk update data event
+                        updatePromises.push(
+                            supabaseClient.from('data_event')
+                                .update({ skor_management: val, catatan_management: kom })
+                                .eq('nama_event', title)
+                                .eq('pic_guru', name)
+                        );
                     } else if (type === 'LeaderComm') {
-                        scoresArr.push({ tipe_komisi: title, pic_guru: name, skor: val, komentar: kom }); 
+                        updatePromises.push(
+                            supabaseClient.from('data_commission')
+                                .update({ skor_management: val, catatan_management: kom })
+                                .eq('tipe_komisi', title)
+                                .eq('pic_guru', name)
+                        );
                     }
                 }
             });
 
-            if(scoresArr.length > 0) { 
+            if(scoresArr.length > 0 || updatePromises.length > 0) { 
                 const btn = document.getElementById('btn-submit-score'); 
                 btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> SAVING...'; 
                 btn.disabled = true;
                 
                 try {
-                    // TENTUKAN ALAMAT GUDANG (TABEL SUPABASE) BERDASARKAN TIPE
-                    let targetTable = '';
-                    if (type === 'Additional') targetTable = 'log_additional_score';
-                    else if (type === 'LeaderEvent') targetTable = 'scoring_event';
-                    else if (type === 'LeaderComm') targetTable = 'scoring_commission';
-
-                    // KIRIM PAKAI JURUS UPSERT
-                    const { error } = await supabaseClient.from(targetTable).upsert(scoresArr);
+                    let hasError = false;
                     
-                    if(!error) { 
+                    if (type === 'Additional' && scoresArr.length > 0) {
+                        // Kirim rombongan pakai UPSERT buat additional
+                        const { error } = await supabaseClient.from('log_additional_score').upsert(scoresArr);
+                        if (error) { hasError = true; console.error(error); showToast('Gagal menyimpan Additional Score: ' + error.message, 'error'); }
+                    } else if ((type === 'LeaderEvent' || type === 'LeaderComm') && updatePromises.length > 0) {
+                        // Kirim satu-satu (update) untuk Event & Komisi
+                        const results = await Promise.all(updatePromises);
+                        results.forEach(res => {
+                            if(res.error) { hasError = true; console.error(res.error); }
+                        });
+                        if (hasError) showToast('Gagal menyimpan nilai Management', 'error');
+                    }
+
+                    if(!hasError) { 
                         showToast('Data Nilai Berhasil Tersimpan', 'success'); 
+                        // Auto-tutup modal dan auto-refresh tampilan
+                        closeModal('input-score-modal');
                         
-                        // Segarkan tampilan sesuai tab yang lagi dibuka
                         if(type === 'Additional') loadAdditionalScoreModules(); 
                         else if(type === 'LeaderEvent') loadLeaderEventData();
                         else if(type === 'LeaderComm') loadLeaderCommissionData();
-                        
-                    } else {
-                        console.error(error);
-                        showToast('Gagal menyimpan: ' + error.message, 'error'); 
                     }
                 } catch (err) {
                     console.error(err);
+                    showToast('Terjadi kesalahan sistem saat menyimpan.', 'error');
                 }
                 
                 btn.innerHTML = 'Submit Score'; 
                 btn.disabled = false; 
-                closeModal('input-score-modal');
             } else { 
                 showToast('Tidak ada satupun nilai yang diinput', 'error'); 
             }
