@@ -173,7 +173,7 @@
             <div class="space-y-5">
                 <div class="relative">
                     <i class="fas fa-fingerprint absolute left-5 top-1/2 transform -translate-y-1/2 text-neoncyan dark:text-neoncyan text-blue-500"></i>
-                    <input type="text" id="login-username" placeholder="Username (Admin/Guru)" class="w-full pl-12 pr-5 py-3 input-cyber text-center tracking-widest uppercase">
+                    <input type="text" id="login-username" placeholder="Username" class="w-full pl-12 pr-5 py-3 input-cyber text-center tracking-widest">
                 </div>
                 <div class="relative">
                     <i class="fas fa-lock absolute left-5 top-1/2 transform -translate-y-1/2 text-neoncyan dark:text-neoncyan text-blue-500"></i>
@@ -1879,19 +1879,24 @@
                 let val = r.querySelector('.inpscore_val')?.value; 
                 let kom = r.querySelector('.inpscore_kom')?.value;
                 if(name && val) { 
-                    if(type === 'Additional') scoresArr.push({ nama_penilaian_periode: title, nama_guru: name, skor: val, komentar: kom }); 
+                    // REVISI 1: Sekarang JS akan mengangkut data APAPUN tanpa membeda-bedakan tipe formnya.
+                    scoresArr.push({ nama_penilaian_periode: title, nama_guru: name, skor: val, komentar: kom }); 
                 }
             });
 
             if(scoresArr.length > 0) { 
-                const btn = document.getElementById('btn-submit-score'); btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> SAVING BULK...'; btn.disabled = true;
+                const btn = document.getElementById('btn-submit-score'); btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> SAVING...'; btn.disabled = true;
                 
                 try {
-                    if(type === 'Additional') {
-                        const { error } = await supabaseClient.from('log_additional_score').insert(scoresArr);
-                        if(!error) { showToast('Penilaian Berhasil Disimpan', 'success'); loadAdditionalScoreModules(); }
+                    // REVISI 2: Menggunakan UPSERT! (Jika data belum ada di-insert, jika sudah ada di-update)
+                    const { error } = await supabaseClient.from('log_additional_score').upsert(scoresArr);
+                    
+                    if(!error) { 
+                        showToast('Data Nilai Berhasil Tersimpan (Upserted)', 'success'); 
+                        if(type === 'Additional') loadAdditionalScoreModules(); 
                     } else {
-                        showToast(`Fitur leader scoring sedang di-maintenance`, 'info'); 
+                        console.error(error);
+                        showToast('Gagal menyimpan: ' + error.message, 'error'); 
                     }
                 } catch (err) {
                     console.error(err);
