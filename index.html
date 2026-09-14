@@ -905,8 +905,12 @@
                 <p class="text-[10px] text-neoncyan font-bold" id="input-score-target">Target: -</p>
                 <p class="text-[10px] text-muted font-bold" id="input-score-period-label"></p>
             </div>
+            
+            <!-- HIDDEN INPUTS FOR SAFE POSTING -->
             <input type="hidden" id="input-score-type">
             <input type="hidden" id="input-score-subcontext">
+            <!-- This is the lifesaver input to prevent uppercase/spacing corruption -->
+            <input type="hidden" id="input-score-raw-title"> 
             
             <div class="space-y-4" id="input-score-body"></div>
             
@@ -1211,7 +1215,14 @@
             if(modalId === 'edit-attendance-modal') loadEditAttendance(); 
             document.getElementById(modalId).classList.add('active'); 
         }
-        function closeModal(modalId) { document.getElementById(modalId).classList.remove('active'); }
+        function closeModal(modalId) { 
+            if(modalId) {
+                document.getElementById(modalId).classList.remove('active');
+            } else {
+                // Fallback for general close
+                document.querySelectorAll('.modal-overlay.active').forEach(m => m.classList.remove('active'));
+            }
+        }
 
         async function loadHomeData(silent = false) { 
             if(!silent) showToast('Syncing Dashboard...', 'info'); 
@@ -1845,13 +1856,19 @@
 
         function openInputScoreFromMemory(idx) {
             let m = currentActiveModules[idx];
-            openInputScore(m.nama_penilaian_periode, m.target, 'Additional', m.nama_penilaian_periode, []); // Simplifying fetching existing scores for now
+            // Passing raw DB title all the way
+            openInputScore(m.nama_penilaian_periode, m.target, 'Additional', m.nama_penilaian_periode, []); 
         }
 
         function openInputScore(title, target, type, subContext = '', existingScores = []) {
-            document.getElementById('input-score-title').innerText = title; document.getElementById('input-score-target').innerText = "Target: " + target;
+            document.getElementById('input-score-title').innerText = title; 
+            document.getElementById('input-score-target').innerText = "Target: " + target;
             document.getElementById('input-score-period-label').innerText = "Periode: " + subContext;
-            document.getElementById('input-score-type').value = type; document.getElementById('input-score-subcontext').value = subContext;
+            
+            document.getElementById('input-score-type').value = type; 
+            document.getElementById('input-score-subcontext').value = subContext;
+            // KUNCI PERBAIKAN FOREIGN KEY: Simpan judul asli tanpa kena uppercase CSS!
+            document.getElementById('input-score-raw-title').value = title; 
             
             let html = '';
             if(target === 'Semua Guru' && globalTeacherList.length > 0) {
@@ -1870,11 +1887,11 @@
         }        
         
         async function submitManualScore() {
-            const title = document.getElementById('input-score-title').innerText;
+            // Ambil judul mentah yang aman dari CSS uppercase
+            const rawTitle = document.getElementById('input-score-raw-title').value; 
             const type = document.getElementById('input-score-type').value; 
-            const period = document.getElementById('input-score-subcontext').value;
             let scoresArr = [];
-            let updatePromises = []; // Khusus untuk Event & Comm karena harus update per baris
+            let updatePromises = []; 
             
             const rows = document.querySelectorAll('#input-score-body > div');
             rows.forEach(r => {
@@ -1882,24 +1899,22 @@
                 let val = r.querySelector('.inpscore_val')?.value; 
                 let kom = r.querySelector('.inpscore_kom')?.value;
                 
-                // FILTER SUPER KETAT: Cuma bungkus kalau nilainya beneran diisi (Bukan string kosong)
+                // MENCEGAH PAKET KOSONG: Hanya simpan jika guru tsb ada nilainya!
                 if(name && val && val.trim() !== "") { 
                     if (type === 'Additional') {
-                        // Harus sama persis dengan kolom master_penilaian_tambahan
-                        scoresArr.push({ nama_penilaian_periode: title, nama_guru: name, skor: val, komentar: kom }); 
+                        scoresArr.push({ nama_penilaian_periode: rawTitle, nama_guru: name, skor: parseInt(val), komentar: kom }); 
                     } else if (type === 'LeaderEvent') {
-                        // Nggak pakai array, langsung susun janji (promise) untuk update data event
                         updatePromises.push(
                             supabaseClient.from('data_event')
-                                .update({ skor_management: val, catatan_management: kom })
-                                .eq('nama_event', title)
+                                .update({ skor_management: parseInt(val), catatan_management: kom })
+                                .eq('nama_event', rawTitle) // Gunakan judul mentah
                                 .eq('pic_guru', name)
                         );
                     } else if (type === 'LeaderComm') {
                         updatePromises.push(
                             supabaseClient.from('data_commission')
-                                .update({ skor_management: val, catatan_management: kom })
-                                .eq('tipe_komisi', title)
+                                .update({ skor_management: parseInt(val), catatan_management: kom })
+                                .eq('tipe_komisi', rawTitle) // Gunakan judul mentah
                                 .eq('pic_guru', name)
                         );
                     }
@@ -1915,26 +1930,26 @@
                     let hasError = false;
                     
                     if (type === 'Additional' && scoresArr.length > 0) {
-                        // Kirim rombongan pakai UPSERT buat additional
-                        const { error } = await supabaseClient.from('log_additional_score').upsert(scoresArr);
+                        // Gunakan upsert dengan patokan konflik KTP ganda (Judul + Nama Guru)
+                        const { error } = await supabaseClient.from('log_additional_score').upsert(scoresArr, { onConflict: 'nama_penilaian_periode, nama_guru' });
                         if (error) { hasError = true; console.error(error); showToast('Gagal menyimpan Additional Score: ' + error.message, 'error'); }
                     } else if ((type === 'LeaderEvent' || type === 'LeaderComm') && updatePromises.length > 0) {
-                        // Kirim satu-satu (update) untuk Event & Komisi
                         const results = await Promise.all(updatePromises);
                         results.forEach(res => {
-                            if(res.error) { hasError = true; console.error(res.error); }
+                            if(res.error) { hasError = true; console.error(res.error); showToast('Gagal menyimpan nilai Management', 'error'); }
                         });
-                        if (hasError) showToast('Gagal menyimpan nilai Management', 'error');
                     }
 
                     if(!hasError) { 
                         showToast('Data Nilai Berhasil Tersimpan', 'success'); 
-                        // Auto-tutup modal dan auto-refresh tampilan
-                        closeModal('input-score-modal');
+                        closeModal('input-score-modal'); // Auto Close
                         
-                        if(type === 'Additional') loadAdditionalScoreModules(); 
-                        else if(type === 'LeaderEvent') loadLeaderEventData();
-                        else if(type === 'LeaderComm') loadLeaderCommissionData();
+                        if(type === 'Additional') {
+                            loadAdditionalScoreModules(); 
+                        }
+                        else if(type === 'LeaderEvent' || type === 'LeaderComm') {
+                            updateCardVisual(type, rawTitle); // Ganti Baju Neon
+                        }
                     }
                 } catch (err) {
                     console.error(err);
@@ -1945,6 +1960,28 @@
                 btn.disabled = false; 
             } else { 
                 showToast('Tidak ada satupun nilai yang diinput', 'error'); 
+            }
+        }
+
+        // Fungsi ajaib ganti baju neon hijau tanpa refresh
+        function updateCardVisual(type, rawTitle) {
+            // Kita generate ID card yang aman (hilangkan spasi) untuk dicari di DOM
+            const safeId = rawTitle.replace(/\s+/g, '-');
+            const cardId = type === 'LeaderEvent' ? `card-leaderevent-${safeId}` : `card-leadercomm-${safeId}`;
+            const card = document.getElementById(cardId);
+            
+            if (card) {
+                // Copot baju lama (Orange/Pink standar)
+                card.classList.remove('border-orange-200', 'dark:border-neonyellow/50', 'hover:border-neonyellow', 'border-pink-200', 'dark:border-neonpink/50', 'hover:border-neonpink');
+                
+                // Pasang baju Neon Hijau kebanggaan
+                card.classList.add('border-neongreen', 'dark:border-neongreen', 'shadow-[0_0_10px_#00fa9a]');
+                
+                // Cari teks petunjuk (yg tulisannya "Klik untuk menilai...") lalu timpa dengan status Centang Hijau
+                const bottomText = card.querySelector('p.text-muted');
+                if (bottomText) {
+                    bottomText.outerHTML = '<span class="text-neongreen font-bold text-[10px] mt-2 block"><i class="fas fa-check-circle"></i> Telah Dinilai</span>';
+                }
             }
         }
 
@@ -1995,7 +2032,21 @@
             try {
                 const { data } = await supabaseClient.from('data_event').select('*');
                 if(data && data.length > 0) {
-                    container.innerHTML = data.map(ev => `<div class="cyber-panel p-5 cursor-pointer hover:border-neonyellow transition" onclick="openInputScore('${ev.nama_event}', '${ev.pic_guru}', 'LeaderEvent', 'Penilaian Kinerja Panitia')"><div class="flex justify-between items-center"><h4 class="font-bold text-lighttext dark:text-white tracking-widest text-xs uppercase truncate pr-2">${ev.nama_event}</h4><span class="text-[9px] bg-orange-100 dark:bg-neonyellow/20 text-orange-600 dark:text-neonyellow border border-orange-200 dark:border-neonyellow/50 px-2 py-0.5 rounded font-bold whitespace-nowrap">PIC: ${ev.pic_guru}</span></div><p class="text-[10px] text-muted font-bold mt-3"><i class="fas fa-edit"></i> Klik untuk menilai performa kepanitiaan</p></div>`).join('');
+                    container.innerHTML = data.map(ev => {
+                        // CEK KONDISI AWAL (Sudah dinilai atau belum)
+                        const isScored = ev.skor_management !== null && ev.skor_management !== undefined;
+                        const borderClass = isScored ? 'border-neongreen dark:border-neongreen shadow-[0_0_10px_#00fa9a]' : 'border-orange-200 dark:border-neonyellow/50 hover:border-neonyellow';
+                        const textClass = isScored ? 'text-neongreen' : 'text-orange-600 dark:text-neonyellow';
+                        const statusText = isScored ? '<span class="text-neongreen font-bold text-[10px] mt-2 block"><i class="fas fa-check-circle"></i> Telah Dinilai</span>' : '<p class="text-[10px] text-muted font-bold mt-3"><i class="fas fa-edit"></i> Klik untuk menilai performa kepanitiaan</p>';
+                        
+                        return `<div id="card-leaderevent-${ev.nama_event.replace(/\s+/g, '-')}" class="cyber-panel p-5 cursor-pointer transition border ${borderClass}" onclick="openInputScore('${ev.nama_event}', '${ev.pic_guru}', 'LeaderEvent', 'Penilaian Kinerja Panitia')">
+                            <div class="flex justify-between items-center">
+                                <h4 class="font-bold text-lighttext dark:text-white tracking-widest text-xs uppercase truncate pr-2">${ev.nama_event}</h4>
+                                <span class="text-[9px] bg-orange-100 dark:bg-neonyellow/20 ${textClass} border border-orange-200 dark:border-neonyellow/50 px-2 py-0.5 rounded font-bold whitespace-nowrap">PIC: ${ev.pic_guru}</span>
+                            </div>
+                            ${statusText}
+                        </div>`;
+                    }).join('');
                 } else { container.innerHTML = `<div class="cyber-panel p-5 text-center text-muted italic col-span-full">Belum ada target event.</div>`; }
             } catch (err) {
                 console.error(err);
@@ -2019,7 +2070,21 @@
             try {
                 const { data } = await supabaseClient.from('data_commission').select('*');
                 if(data && data.length > 0) {
-                    container.innerHTML = data.map(comm => `<div class="cyber-panel p-5 cursor-pointer hover:border-neonpink transition" onclick="openInputScore('${comm.tipe_komisi}', '${comm.pic_guru}', 'LeaderComm', 'Evaluasi Kinerja Komisi')"><div class="flex justify-between items-center"><h4 class="font-bold text-lighttext dark:text-white tracking-widest text-xs uppercase truncate pr-2">${comm.tipe_komisi}</h4><span class="text-[9px] bg-pink-100 dark:bg-neonpink/20 text-pink-600 dark:text-neonpink border border-pink-200 dark:border-neonpink/50 px-2 py-0.5 rounded font-bold whitespace-nowrap">PIC: ${comm.pic_guru}</span></div><p class="text-[10px] text-muted font-bold mt-3"><i class="fas fa-edit"></i> Klik untuk menilai performa komisi</p></div>`).join('');
+                    container.innerHTML = data.map(comm => {
+                        // CEK KONDISI AWAL (Sudah dinilai atau belum)
+                        const isScored = comm.skor_management !== null && comm.skor_management !== undefined;
+                        const borderClass = isScored ? 'border-neongreen dark:border-neongreen shadow-[0_0_10px_#00fa9a]' : 'border-pink-200 dark:border-neonpink/50 hover:border-neonpink';
+                        const textClass = isScored ? 'text-neongreen' : 'text-pink-600 dark:text-neonpink';
+                        const statusText = isScored ? '<span class="text-neongreen font-bold text-[10px] mt-2 block"><i class="fas fa-check-circle"></i> Telah Dinilai</span>' : '<p class="text-[10px] text-muted font-bold mt-3"><i class="fas fa-edit"></i> Klik untuk menilai performa komisi</p>';
+                        
+                        return `<div id="card-leadercomm-${comm.tipe_komisi.replace(/\s+/g, '-')}" class="cyber-panel p-5 cursor-pointer transition border ${borderClass}" onclick="openInputScore('${comm.tipe_komisi}', '${comm.pic_guru}', 'LeaderComm', 'Evaluasi Kinerja Komisi')">
+                            <div class="flex justify-between items-center">
+                                <h4 class="font-bold text-lighttext dark:text-white tracking-widest text-xs uppercase truncate pr-2">${comm.tipe_komisi}</h4>
+                                <span class="text-[9px] bg-pink-100 dark:bg-neonpink/20 ${textClass} border border-pink-200 dark:border-neonpink/50 px-2 py-0.5 rounded font-bold whitespace-nowrap">PIC: ${comm.pic_guru}</span>
+                            </div>
+                            ${statusText}
+                        </div>`;
+                    }).join('');
                 } else { container.innerHTML = `<div class="cyber-panel p-5 text-center text-muted italic col-span-full">Belum ada target komisi.</div>`; }
             } catch (err) {
                 console.error(err);
