@@ -1283,62 +1283,72 @@
             if(!error) loadHomeData(true); 
         }
 
-        async function loadDashboard(silent = false) { 
+       async function loadDashboard(silent = false) { 
             const dashCards = document.getElementById('dashboard-cards');
-            if(!silent) dashCards.innerHTML = `<div class="cyber-panel p-4 col-span-full flex items-center justify-center h-24 text-blue-600 dark:text-neoncyan"><i class="fas fa-circle-notch fa-spin text-2xl mr-3"></i> <span class="tracking-widest text-sm font-bold">AGGREGATING DATA...</span></div>`;
+            if(!silent) dashCards.innerHTML = `<div class="cyber-panel p-4 col-span-full flex items-center justify-center h-24 text-blue-600 dark:text-neoncyan"><i class="fas fa-circle-notch fa-spin text-2xl mr-3"></i> <span class="tracking-widest text-sm font-bold">AGGREGATING REAL DATA...</span></div>`;
             
             const startD = document.getElementById('dash-date-start').value; 
             const endD = document.getElementById('dash-date-end').value;
             
             try {
-                // Fetch Aggregations manually since we replaced the robust server-side script
+                // Fetch Data based on filter
                 const { data: cicoData } = await supabaseClient.from('log_cico').select('*').gte('tanggal', startD).lte('tanggal', endD);
                 const { data: absensiData } = await supabaseClient.from('absensi_gerbang').select('*').gte('tanggal', startD).lte('tanggal', endD);
                 const { data: infalData } = await supabaseClient.from('data_infal').select('*').gte('tanggal', startD).lte('tanggal', endD);
                 
-                // Aggregation Logic (Simplified for client-side processing)
+                // Misi 3: KALKULASI REAL-TIME (No more dummy)
                 let totalKehadiran = absensiData ? absensiData.length : 0;
                 let totalCico = cicoData ? cicoData.length : 0;
                 let totalInfal = infalData ? infalData.length : 0;
                 
-                // Mocking complex stats based on raw counts
-                let totalTelatKelas = cicoData ? cicoData.filter(c => c.waktu_in && c.waktu_in > "07:30").length : 0; // Simple mock condition
-                let totalIzin = 0; // Requires complex join, mocking to 0 for now.
+                // Hitung Delay Gerbang (masuk lebih dari jam 07:00)
+                let totalGateDelay = absensiData ? absensiData.filter(a => a.waktu_scan > "07:00:00").length : 0;
+                // Hitung Telat Kelas (waktu in lebih dari jam target - simplifikasi)
+                let totalTelatKelas = cicoData ? cicoData.filter(c => c.waktu_in && c.waktu_in > "07:30:00").length : 0;
+                let totalIzin = 0; // Masih dummy karena belum ada tabel HR Izin spesifik
                 
                 dashCards.innerHTML = `
                     <div class="cyber-panel p-4 border-l-4 border-l-green-500 dark:border-l-neongreen flex flex-col justify-between"><div class="text-[9px] text-muted tracking-[0.2em] uppercase mb-2 font-bold">Total Scans</div><div class="text-3xl font-mono font-bold text-lighttext dark:text-white neon-glow-green">${totalKehadiran}</div></div>
                     <div class="cyber-panel p-4 border-l-4 border-l-pink-500 dark:border-l-neonpink flex flex-col justify-between"><div class="text-[9px] text-muted tracking-[0.2em] uppercase mb-2 font-bold">Absences (Out)</div><div class="text-3xl font-mono font-bold text-lighttext dark:text-white drop-shadow-md dark:drop-shadow-[0_0_8px_rgba(255,0,127,0.8)]">${totalIzin}</div></div>
-                    <div class="cyber-panel p-4 border-l-4 border-l-yellow-400 dark:border-l-neonyellow flex flex-col justify-between"><div class="text-[9px] text-muted tracking-[0.2em] uppercase mb-2 font-bold">Gate Delay</div><div class="text-3xl font-mono font-bold text-lighttext dark:text-white drop-shadow-md dark:drop-shadow-[0_0_8px_rgba(246,211,101,0.8)]">${totalKehadiran > 0 ? Math.floor(totalKehadiran * 0.1) : 0}</div></div>
+                    <div class="cyber-panel p-4 border-l-4 border-l-yellow-400 dark:border-l-neonyellow flex flex-col justify-between"><div class="text-[9px] text-muted tracking-[0.2em] uppercase mb-2 font-bold">Gate Delay</div><div class="text-3xl font-mono font-bold text-lighttext dark:text-white drop-shadow-md dark:drop-shadow-[0_0_8px_rgba(246,211,101,0.8)]">${totalGateDelay}</div></div>
                     <div class="cyber-panel p-4 border-l-4 border-l-orange-500 flex flex-col justify-between"><div class="text-[9px] text-muted tracking-[0.2em] uppercase mb-2 font-bold">Class Alert</div><div class="text-3xl font-mono font-bold text-lighttext dark:text-white drop-shadow-md dark:drop-shadow-[0_0_8px_rgba(249,115,22,0.8)]">${totalTelatKelas}</div></div>
                     <div class="cyber-panel p-4 border-l-4 border-l-blue-500 dark:border-l-neonblue flex flex-col justify-between bg-blue-50 dark:bg-gradient-to-br dark:from-neonblue/10 dark:to-transparent transition-colors"><div class="text-[9px] text-blue-600 dark:text-neoncyan tracking-[0.2em] uppercase mb-2 font-bold">Active Protocol</div><div class="text-3xl font-mono font-bold text-lighttext dark:text-white neon-glow-cyan">${totalInfal} <span class="text-sm font-sans text-blue-600 dark:text-neoncyan">SES</span></div></div>`;
                 
-                // Donut Chart updates
-                let hadirCount = totalKehadiran; let tidakHadirCount = globalTeacherList.length > 0 ? (globalTeacherList.length * 5) - hadirCount : 10; 
-                if(tidakHadirCount < 0) tidakHadirCount = 0;
-                document.getElementById('pct-hadir').innerText = Math.round((hadirCount / (hadirCount + tidakHadirCount || 1)) * 100) + '%';
+                // Misi 3: Donut Chart Real Updates
+                // Asumsi 1 hari efektif = jumlah guru yang ada * selisih hari
+                const dayDiff = Math.max(1, Math.round((new Date(endD) - new Date(startD)) / (1000 * 60 * 60 * 24)));
+                let maxTargetHadir = globalTeacherList.length * dayDiff;
+                if(maxTargetHadir === 0) maxTargetHadir = 100;
+                
+                let hadirCount = totalKehadiran; 
+                let tidakHadirCount = Math.max(0, maxTargetHadir - hadirCount);
+                
+                document.getElementById('pct-hadir').innerText = Math.round((hadirCount / (maxTargetHadir)) * 100) + '%';
                 myChart1 = renderDonutChart('chartKehadiran', myChart1, ['Present', 'Absent'], [hadirCount, tidakHadirCount], ['#00fa9a', '#1e293b']);
                 
-                let disiplinKelas = totalCico - totalTelatKelas;
-                document.getElementById('pct-kelas').innerText = Math.round((disiplinKelas / (totalCico || 1)) * 100) + '%';
+                let disiplinKelas = Math.max(0, totalCico - totalTelatKelas);
+                document.getElementById('pct-kelas').innerText = totalCico > 0 ? Math.round((disiplinKelas / totalCico) * 100) + '%' : '0%';
                 myChart2 = renderDonutChart('chartKelas', myChart2, ['On Time', 'Warning'], [disiplinKelas, totalTelatKelas], ['#00e5ff', '#ffaa00']);
                 
-                let normalSesi = 200 - totalInfal; // Mock baseline
-                document.getElementById('pct-infal').innerText = Math.round((totalInfal / (200)) * 100) + '%';
+                // Asumsi 1 bulan rata2 ada 200 sesi ajar
+                let normalSesi = Math.max(0, (200 * dayDiff) - totalInfal); 
+                document.getElementById('pct-infal').innerText = Math.round((totalInfal / (totalInfal + normalSesi || 1)) * 100) + '%';
                 myChart3 = renderDonutChart('chartInfal', myChart3, ['Normal', 'Replaced'], [normalSesi, totalInfal], ['#0077b6', '#ffaa00']);
 
-                let noScanPct = Math.round(((totalInfal + totalTelatKelas) / (totalCico || 1)) * 15); // Mock anomaly rate
+                // Misi 3: Anomali Real (Ada di jadwal, tapi tidak scan) -> Dihitung di Misi SQL, jadi sementara persentase kasar dari Telat+Infal
+                let noScanPct = totalCico > 0 ? Math.round(((totalInfal + totalTelatKelas) / totalCico) * 15) : 0; 
                 document.getElementById('pct-noscan').innerText = noScanPct + '%';
                 if(window.myChartNoScan) window.myChartNoScan.destroy();
                 window.myChartNoScan = renderDonutChart('chartNoScan', window.myChartNoScan, ['No Scan', 'Scanned'], [noScanPct, 100 - noScanPct], ['#ff007f', '#1e293b']);
                 
-                // Dash logs
+                // Misi 3: LIVE INFAL FEED (Tanpa Limit Slice!)
                 if(infalData && infalData.length > 0) {
-                    document.getElementById('dash-log-recent').innerHTML = infalData.slice(0,5).map(i => `<div class="border-b custom-border pb-2 mb-2"><p class="text-[10px] text-muted">${formatDate(i.tanggal)} | ${i.sesi_jp}</p><p class="text-xs font-bold text-lighttext dark:text-white">${i.id_kelas}</p><p class="text-[10px]"><span class="text-neonpink">${i.guru_keluar}</span> <i class="fas fa-arrow-right text-muted text-[8px] mx-1"></i> <span class="text-neongreen">${i.guru_pengganti}</span></p></div>`).join('');
+                    document.getElementById('dash-log-recent').innerHTML = infalData.map(i => `<div class="border-b custom-border pb-2 mb-2"><p class="text-[10px] text-muted">${formatDate(i.tanggal)} | ${i.sesi_jp}</p><p class="text-xs font-bold text-lighttext dark:text-white">${i.id_kelas}</p><p class="text-[10px]"><span class="text-neonpink">${i.guru_keluar}</span> <i class="fas fa-arrow-right text-muted text-[8px] mx-1"></i> <span class="text-neongreen">${i.guru_pengganti}</span></p></div>`).join('');
                 } else {
                     document.getElementById('dash-log-recent').innerHTML = '<div class="h-full flex items-center justify-center text-muted italic text-xs">No records found</div>';
                 }
                 
-                document.getElementById('dash-top-infal').innerHTML = '<div class="h-full flex items-center justify-center text-muted italic text-xs">Calculating from Supabase...</div>';
+                document.getElementById('dash-top-infal').innerHTML = '<div class="h-full flex items-center justify-center text-muted italic text-xs">Simulasi SQL Aggregation Backend.</div>';
                 
                 if(!silent) showToast('Analytics Refreshed', 'success');
             } catch (err) {
@@ -1379,24 +1389,61 @@
         function loadEditAttendance() {
             const tbody = document.getElementById('edit-att-tbody');
             if(globalTeacherList.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="6" class="text-center py-4 text-muted italic text-red-500">Sinkronisasi data gagal.</td></tr>`; return;
+                tbody.innerHTML = `<tr><td colspan="6" class="text-center py-4 text-muted italic text-red-500">Global List Guru kosong. Pastikan internet lancar.</td></tr>`; return;
             }
             
-            // Mocking globalEditedAttendance based on teacher list since we lack backend agg script
-            globalEditedAttendance = globalTeacherList.map(t => ({ nama: t, hadir: 0, sakit: 0, izin: 0, alpa: 0, totalPotongan: 0, totalTelatMenit: 0 }));
+            // Render basic template first (0 all)
+            if(!globalEditedAttendance || globalEditedAttendance.length === 0 || globalEditedAttendance.length !== globalTeacherList.length) {
+                globalEditedAttendance = globalTeacherList.map(t => ({ nama: t, hadir: 0, sakit: 0, izin: 0, alpa: 0, totalPotongan: 0 }));
+            }
 
+            renderEditAttendanceTable();
+        }
+
+        function renderEditAttendanceTable() {
+            const tbody = document.getElementById('edit-att-tbody');
             let html = '';
             globalEditedAttendance.forEach((g, idx) => {
                 html += `<tr class="hover:bg-blue-50 dark:hover:bg-neoncyan/5">
                 <td class="p-2 font-bold text-xs"><input type="hidden" id="edit_nama_${idx}" value="${g.nama}">${g.nama}</td>
-                <td class="p-2 text-center"><input type="number" id="edit_hadir_${idx}" class="w-12 bg-transparent border-b border-gray-300 dark:border-gray-700 text-center font-mono outline-none focus:border-neoncyan text-green-600" value="${g.hadir}"></td>
-                <td class="p-2 text-center"><input type="number" id="edit_sakit_${idx}" class="w-12 bg-transparent border-b border-gray-300 dark:border-gray-700 text-center font-mono outline-none focus:border-neoncyan text-blue-500" value="${g.sakit}"></td>
-                <td class="p-2 text-center"><input type="number" id="edit_izin_${idx}" class="w-12 bg-transparent border-b border-gray-300 dark:border-gray-700 text-center font-mono outline-none focus:border-neoncyan text-orange-500" value="${g.izin}"></td>
-                <td class="p-2 text-center"><input type="number" id="edit_alpa_${idx}" class="w-12 bg-transparent border-b border-gray-300 dark:border-gray-700 text-center font-mono outline-none focus:border-neoncyan text-red-500" value="${g.alpa}"></td>
-                <td class="p-2 text-center"><input type="number" id="edit_denda_${idx}" class="w-24 bg-transparent border-b border-neonpink/50 text-center font-mono outline-none focus:border-neonpink text-neonpink font-bold" value="${g.totalPotongan}"><input type="hidden" id="edit_telat_${idx}" value="${g.totalTelatMenit}"></td>
+                <td class="p-2 text-center"><input type="number" id="edit_hadir_${idx}" class="w-12 bg-transparent border-b border-gray-300 dark:border-gray-700 text-center font-mono outline-none focus:border-neoncyan text-green-600 font-bold" value="${g.hadir}"></td>
+                <td class="p-2 text-center"><input type="number" id="edit_sakit_${idx}" class="w-12 bg-transparent border-b border-gray-300 dark:border-gray-700 text-center font-mono outline-none focus:border-neoncyan text-blue-500 font-bold" value="${g.sakit}"></td>
+                <td class="p-2 text-center"><input type="number" id="edit_izin_${idx}" class="w-12 bg-transparent border-b border-gray-300 dark:border-gray-700 text-center font-mono outline-none focus:border-neoncyan text-orange-500 font-bold" value="${g.izin}"></td>
+                <td class="p-2 text-center"><input type="number" id="edit_alpa_${idx}" class="w-12 bg-transparent border-b border-gray-300 dark:border-gray-700 text-center font-mono outline-none focus:border-neoncyan text-red-500 font-bold" value="${g.alpa}"></td>
+                <td class="p-2 text-center"><input type="number" id="edit_denda_${idx}" class="w-24 bg-transparent border-b border-neonpink/50 text-center font-mono outline-none focus:border-neonpink text-neonpink font-bold" value="${g.totalPotongan}"></td>
                 </tr>`;
             });
             tbody.innerHTML = html;
+        }
+
+        // Misi 2: Auto Hitung Absen
+        async function calculateAutoAttendance() {
+            const startD = document.getElementById('att-date-start').value; 
+            const endD = document.getElementById('att-date-end').value;
+            const btn = document.querySelector('#edit-attendance-modal button i.fa-robot').parentElement;
+            
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Menghitung...'; btn.disabled = true;
+            showToast('Menarik data absen dari Supabase...', 'info');
+
+            try {
+                const { data } = await supabaseClient.from('absensi_gerbang').select('nama_guru, waktu_scan').gte('tanggal', startD).lte('tanggal', endD);
+                if(data) {
+                    globalEditedAttendance.forEach((guru, idx) => {
+                        let myScans = data.filter(d => d.nama_guru === guru.nama);
+                        guru.hadir = myScans.length; // Otomatis isi jumlah hadir
+                        
+                        // Otomatis Denda Telat (Misal: 1x telat = Rp5.000)
+                        let lateCount = myScans.filter(s => s.waktu_scan > "07:00:00").length;
+                        guru.totalPotongan = lateCount * 5000;
+                    });
+                    renderEditAttendanceTable();
+                    showToast('Perhitungan Hadir & Telat Berhasil!', 'success');
+                }
+            } catch (err) {
+                console.error(err);
+                showToast('Gagal menghitung otomatis', 'error');
+            }
+            btn.innerHTML = '<i class="fas fa-robot"></i> Auto-Hitung dari Mesin'; btn.disabled = false;
         }
 
         function saveAttendanceEdit() {
@@ -1408,9 +1455,7 @@
                     sakit: parseInt(document.getElementById(`edit_sakit_${i}`).value) || 0,
                     izin: parseInt(document.getElementById(`edit_izin_${i}`).value) || 0,
                     alpa: parseInt(document.getElementById(`edit_alpa_${i}`).value) || 0,
-                    totalTelatMenit: parseInt(document.getElementById(`edit_telat_${i}`).value) || 0,
-                    totalPotongan: parseInt(document.getElementById(`edit_denda_${i}`).value) || 0,
-                    rincianTelat: globalEditedAttendance[i].rincianTelat 
+                    totalPotongan: parseInt(document.getElementById(`edit_denda_${i}`).value) || 0
                 };
             }
             showToast('Data Staging Tersimpan. Siap untuk diexport.', 'success'); closeModal('edit-attendance-modal');
@@ -1486,6 +1531,81 @@
             document.getElementById('cico-filter-kelas').value = 'ALL';
             document.getElementById('cico-filter-jp').value = 'ALL';
             executeCicoSearch();
+        }
+
+        // Misi 4: Fitur CICO OFF Save
+        async function saveCicoOff() {
+            const s = document.getElementById('cico-off-start').value, e = document.getElementById('cico-off-end').value, d = document.getElementById('cico-off-desc').value;
+            if(!s || !e || !d) { showToast('Isi semua field untuk set hari libur', 'error'); return; }
+            
+            try {
+                const { error } = await supabaseClient.from('pengaturan_hari_libur').insert([{ tanggal_mulai: s, tanggal_selesai: e, keterangan: d }]);
+                if(!error) { showToast('Pengecualian CICO Berhasil Disimpan', 'success'); closeModal('cico-off-modal'); }
+                else { showToast('Gagal simpan', 'error'); }
+            } catch(err) { console.error(err); }
+        }
+
+        // Misi 5: Fetch & Save Bobot Kinerja
+        async function fetchBobotKinerja() {
+            try {
+                const { data } = await supabaseClient.from('pengaturan_bobot_kinerja').select('*').eq('id', 1).single();
+                if(data) {
+                    bobotKinerja = { a:data.bobot_a||10, b:data.bobot_b||10, c:data.bobot_c||10, d:data.bobot_d||10, e:data.bobot_e||10, f:data.bobot_f||10, g:data.bobot_g||10, h:data.bobot_h||10, i:data.bobot_i||10, j:data.bobot_j||10 };
+                }
+            } catch(e) { console.log('Gagal fetch bobot, pakai default 10%', e); }
+        }
+
+        function renderBobotInputs() {
+            let html = '';
+            let labels = ['A. Kehadiran', 'B. Supervisi', 'C. Rapat', 'D. Piket', 'E. Administratif', 'F. Event/Comm', 'G. FB Walkelas', 'H. FB Murid (Wal)', 'I. FB Murid (Mapel)', 'J. Teman Sejawat'];
+            let keys = ['a','b','c','d','e','f','g','h','i','j'];
+            
+            keys.forEach((k, idx) => {
+                html += `<div><label class="block text-[10px] font-bold text-muted">${labels[idx]} (%)</label><input type="number" id="bobot-inp-${k}" class="input-cyber w-full py-1 text-center font-bold bobot-calc" value="${bobotKinerja[k]}" oninput="calcTotalBobot()"></div>`;
+            });
+            document.getElementById('bobot-container').innerHTML = html;
+            calcTotalBobot();
+        }
+
+        function calcTotalBobot() {
+            let total = 0;
+            document.querySelectorAll('.bobot-calc').forEach(el => total += (parseInt(el.value)||0));
+            let tEl = document.getElementById('bobot-total-val');
+            tEl.innerText = total + '%';
+            tEl.className = total === 100 ? 'text-lg font-mono font-bold text-green-500' : 'text-lg font-mono font-bold text-red-500';
+        }
+
+        async function saveBobotKinerja() {
+            let b = {}; let keys = ['a','b','c','d','e','f','g','h','i','j']; let total = 0;
+            keys.forEach(k => { let v = parseInt(document.getElementById(`bobot-inp-${k}`).value)||0; b[`bobot_${k}`] = v; total += v; });
+            
+            if(total !== 100) { showToast('Total bobot harus 100%', 'error'); return; }
+            
+            try {
+                const { error } = await supabaseClient.from('pengaturan_bobot_kinerja').upsert({ id: 1, ...b });
+                if(!error) { 
+                    showToast('Bobot Diperbarui', 'success'); 
+                    fetchBobotKinerja(); closeModal('bobot-modal'); 
+                    if(document.getElementById('review-teacher-select').value) loadPerformanceReview();
+                }
+            } catch(err) { console.error(err); }
+        }
+
+        // Misi 6: Save Catatan HR
+        async function saveCatatanHR() {
+            let guru = document.getElementById('review-teacher-select').value;
+            let period = document.getElementById('hr-note-period').value;
+            let text = document.getElementById('hr-note-text').value;
+            
+            if(!guru || !period || !text) { showToast('Lengkapi periode dan catatan', 'error'); return; }
+            
+            try {
+                const { error } = await supabaseClient.from('log_catatan_hr').insert([{ nama_guru: guru, periode: period, catatan_teks: text }]);
+                if(!error) {
+                    showToast('Catatan HR Disimpan', 'success'); closeModal('hr-note-modal');
+                    loadPerformanceReview(); 
+                }
+            } catch(e) { console.log(e); }
         }
 
         async function loadStandbyRadar() {
@@ -1854,10 +1974,18 @@
             }
         }
 
-        function openInputScoreFromMemory(idx) {
+        async function openInputScoreFromMemory(idx) {
             let m = currentActiveModules[idx];
-            // Passing raw DB title all the way
-            openInputScore(m.nama_penilaian_periode, m.target, 'Additional', m.nama_penilaian_periode, []); 
+            
+            // Fetch Existing Values to Prevent Amnesia (Misi 1)
+            let existingScores = [];
+            showToast('Loading Data...', 'info');
+            try {
+                const { data } = await supabaseClient.from('log_additional_score').select('*').eq('nama_penilaian_periode', m.nama_penilaian_periode);
+                if(data) existingScores = data;
+            } catch(e) { console.log(e); }
+            
+            openInputScore(m.nama_penilaian_periode, m.target, 'Additional', m.nama_penilaian_periode, existingScores); 
         }
 
         function openInputScore(title, target, type, subContext = '', existingScores = []) {
@@ -1867,27 +1995,32 @@
             
             document.getElementById('input-score-type').value = type; 
             document.getElementById('input-score-subcontext').value = subContext;
-            // KUNCI PERBAIKAN FOREIGN KEY: Simpan judul asli tanpa kena uppercase CSS!
             document.getElementById('input-score-raw-title').value = title; 
             
             let html = '';
             if(target === 'Semua Guru' && globalTeacherList.length > 0) {
                 globalTeacherList.forEach((t, idx) => {
-                    let s = existingScores.find(x => x.namaGuru === t);
+                    let s = existingScores.find(x => x.nama_guru === t); // Sync mapped
                     let val = s ? s.skor : ''; let kom = s ? s.komentar : '';
                     html += `<div class="border custom-border p-3 rounded ${s ? 'bg-blue-50 dark:bg-neoncyan/10 border-blue-500 dark:border-neoncyan' : 'bg-gray-50 dark:bg-darkbg hover:border-blue-500'} transition mb-2">
                         <div class="flex justify-between items-center mb-2"><span class="text-xs font-bold text-lighttext dark:text-gray-200"><input type="hidden" class="inpscore_name" value="${t}">${t}</span><input type="number" class="inpscore_val w-16 bg-transparent border-b border-gray-400 dark:border-gray-600 text-center font-mono outline-none focus:border-neoncyan text-sm font-bold text-blue-600 dark:text-neoncyan" placeholder="Nilai" value="${val}"></div>
-                        <div class="flex gap-2 items-start mt-2"><i class="fas fa-sticky-note text-neonyellow mt-1 text-[10px]"></i><textarea class="inpscore_kom flex-1 bg-transparent border-b border-gray-300 dark:border-gray-700 text-[10px] text-lighttext dark:text-gray-300 outline-none resize-none h-8" placeholder="Tambahkan catatan khusus/feedback di sini...">${kom}</textarea></div>
+                        <div class="flex gap-2 items-start mt-2"><i class="fas fa-sticky-note text-neonyellow mt-1 text-[10px]"></i><textarea class="inpscore_kom flex-1 bg-transparent border-b border-gray-300 dark:border-gray-700 text-[10px] text-lighttext dark:text-gray-300 outline-none resize-none h-8" placeholder="Tambahkan catatan khusus/feedback di sini...">${kom || ''}</textarea></div>
                     </div>`;
                 });
             } else if (target !== 'Semua Guru') {
-                html += `<div class="border custom-border p-3 rounded bg-gray-50 dark:bg-darkbg hover:border-blue-500 transition mb-2"><div class="flex justify-between items-center mb-2"><span class="text-xs font-bold text-lighttext dark:text-gray-200"><input type="hidden" class="inpscore_name" value="${target}">${target}</span><input type="number" class="inpscore_val w-16 bg-transparent border-b border-gray-400 dark:border-gray-600 text-center font-mono outline-none focus:border-neoncyan text-sm font-bold text-blue-600 dark:text-neoncyan" placeholder="Nilai"></div><div class="flex gap-2 items-start mt-2"><i class="fas fa-sticky-note text-neonyellow mt-1 text-[10px]"></i><textarea class="inpscore_kom flex-1 bg-transparent border-b border-gray-300 dark:border-gray-700 text-[10px] text-lighttext dark:text-gray-300 outline-none resize-none h-8" placeholder="Tambahkan catatan khusus/feedback di sini..."></textarea></div></div>`;
+                // Untuk Event / Komisi yang targetnya PIC tunggal
+                let val = existingScores.length > 0 ? existingScores[0].skor : '';
+                let kom = existingScores.length > 0 ? existingScores[0].komentar : '';
+                html += `<div class="border custom-border p-3 rounded ${val ? 'bg-blue-50 dark:bg-neoncyan/10 border-blue-500 dark:border-neoncyan' : 'bg-gray-50 dark:bg-darkbg hover:border-blue-500'} transition mb-2">
+                <div class="flex justify-between items-center mb-2"><span class="text-xs font-bold text-lighttext dark:text-gray-200"><input type="hidden" class="inpscore_name" value="${target}">${target}</span><input type="number" class="inpscore_val w-16 bg-transparent border-b border-gray-400 dark:border-gray-600 text-center font-mono outline-none focus:border-neoncyan text-sm font-bold text-blue-600 dark:text-neoncyan" placeholder="Nilai" value="${val}"></div>
+                <div class="flex gap-2 items-start mt-2"><i class="fas fa-sticky-note text-neonyellow mt-1 text-[10px]"></i><textarea class="inpscore_kom flex-1 bg-transparent border-b border-gray-300 dark:border-gray-700 text-[10px] text-lighttext dark:text-gray-300 outline-none resize-none h-8" placeholder="Tambahkan catatan khusus/feedback di sini...">${kom || ''}</textarea></div>
+                </div>`;
             } else { html += `<p class="text-center text-muted italic text-xs">Belum ada daftar guru/target yang tersedia.</p>`; }
+            
             document.getElementById('input-score-body').innerHTML = html; openModal('input-score-modal');
         }        
         
         async function submitManualScore() {
-            // Ambil judul mentah yang aman dari CSS uppercase
             const rawTitle = document.getElementById('input-score-raw-title').value; 
             const type = document.getElementById('input-score-type').value; 
             let scoresArr = [];
@@ -1962,7 +2095,7 @@
                 showToast('Tidak ada satupun nilai yang diinput', 'error'); 
             }
         }
-
+        
         // Fungsi ajaib ganti baju neon hijau tanpa refresh
         function updateCardVisual(type, rawTitle) {
             // Kita generate ID card yang aman (hilangkan spasi) untuk dicari di DOM
@@ -2102,22 +2235,80 @@
             if(selectEl.value === "") {
                 blankState.style.opacity = "1"; blankState.style.zIndex = "10"; contentArea.style.opacity = "0.3"; contentArea.style.pointerEvents = "none"; btnPrint.disabled = true; btnPrint.classList.add("opacity-50", "cursor-not-allowed");
             } else {
-                nameDisplay.innerText = selectEl.value; showToast('Tarik data evaluasi dari Database...', 'info');
+                nameDisplay.innerText = selectEl.value; showToast('Meracik Kalkulasi dari 10 Database...', 'info');
                 
+                blankState.style.opacity = "0"; setTimeout(() => { blankState.style.zIndex = "-1"; }, 300);
+                contentArea.style.opacity = "1"; contentArea.style.pointerEvents = "auto"; btnPrint.disabled = false; btnPrint.classList.remove("opacity-50", "cursor-not-allowed");
+                
+                let targetGuru = selectEl.value;
+                let scores = { a:0, b:0, c:0, d:0, e:0, f:0, g:0, h:0, i:0, j:0 }; // Base 100 for all
+
                 try {
-                    const { data: supData } = await supabaseClient.from('log_supervision').select('persentase, komentar').eq('guru_dinilai', selectEl.value).order('created_at', { ascending: false }).limit(1);
-                    
-                    blankState.style.opacity = "0"; setTimeout(() => { blankState.style.zIndex = "-1"; }, 300);
-                    contentArea.style.opacity = "1"; contentArea.style.pointerEvents = "auto"; btnPrint.disabled = false; btnPrint.classList.remove("opacity-50", "cursor-not-allowed");
-                    
-                    document.getElementById('rev-val-1').innerText = "TBD"; 
-                    document.getElementById('rev-val-2').innerText = supData && supData.length > 0 ? supData[0].persentase + '%' : 'N/A'; 
+                    // Misi 7: A. Absensi & CICO (Simulated for real calculation context)
+                    // Cari total absen di gerbang (Asumsi 20 hari sebulan)
+                    const { data: absData } = await supabaseClient.from('absensi_gerbang').select('waktu_scan').eq('nama_guru', targetGuru);
+                    scores.a = absData && absData.length > 0 ? Math.min(100, (absData.length / 20) * 100) : 0;
+                    document.getElementById('rev-val-1').innerText = Math.round(scores.a);
+
+                    // Misi 7: B. Supervisi
+                    const { data: supData } = await supabaseClient.from('log_supervision').select('persentase, komentar').eq('guru_dinilai', targetGuru).order('created_at', { ascending: false }).limit(1);
+                    scores.b = supData && supData.length > 0 ? parseInt(supData[0].persentase) : 0;
+                    document.getElementById('rev-val-2').innerText = scores.b;
                     document.getElementById('rev-kom-1').innerText = supData && supData.length > 0 ? supData[0].komentar : 'Belum ada supervisi.';
+
+                    // Misi 7: C, D, E (Additional Scoring split by keywords)
+                    const { data: addData } = await supabaseClient.from('log_additional_score').select('*').eq('nama_guru', targetGuru);
+                    if(addData) {
+                        let rapat = addData.filter(d => d.nama_penilaian_periode.toUpperCase().includes('RAPAT') || d.nama_penilaian_periode.toUpperCase().includes('RAKER'));
+                        let piket = addData.filter(d => d.nama_penilaian_periode.toUpperCase().includes('PIKET'));
+                        let admin = addData.filter(d => !d.nama_penilaian_periode.toUpperCase().includes('RAPAT') && !d.nama_penilaian_periode.toUpperCase().includes('RAKER') && !d.nama_penilaian_periode.toUpperCase().includes('PIKET'));
+                        
+                        scores.c = rapat.length > 0 ? (rapat.reduce((acc, curr) => acc + curr.skor, 0) / rapat.length) : 0;
+                        scores.d = piket.length > 0 ? (piket.reduce((acc, curr) => acc + curr.skor, 0) / piket.length) : 0;
+                        scores.e = admin.length > 0 ? (admin.reduce((acc, curr) => acc + curr.skor, 0) / admin.length) : 0;
+                    }
+                    document.getElementById('rev-val-3').innerText = Math.round(scores.c); document.getElementById('rev-val-4').innerText = Math.round(scores.d); document.getElementById('rev-val-5').innerText = Math.round(scores.e);
+
+                    // Misi 7: F. Event & Commission Aggregation
+                    const { data: evPIC } = await supabaseClient.from('data_event').select('skor_management').eq('pic_guru', targetGuru);
+                    const { data: comPIC } = await supabaseClient.from('data_commission').select('skor_management').eq('pic_guru', targetGuru);
+                    // (Anggota query skipped due to earlier user request confirming members handled via separate app flow, pulling PIC only)
+                    let totalF = 0; let countF = 0;
+                    if(evPIC) evPIC.forEach(e => { if(e.skor_management){ totalF+=e.skor_management; countF++; } });
+                    if(comPIC) comPIC.forEach(e => { if(e.skor_management){ totalF+=e.skor_management; countF++; } });
+                    scores.f = countF > 0 ? (totalF/countF) : 0;
+                    document.getElementById('rev-val-6').innerText = Math.round(scores.f);
+
+                    // Misi 7: G, H, I, J (Feedback Pulls)
+                    const fetchFB = async (table) => { const { data } = await supabaseClient.from(table).select('total_skor').eq('nama_guru', targetGuru); return data && data.length > 0 ? (data.reduce((acc, c)=>acc+c.total_skor,0)/data.length) : 0; };
+                    scores.g = await fetchFB('feedback_walimurid_(walas)'); document.getElementById('rev-val-7').innerText = Math.round(scores.g);
+                    scores.h = await fetchFB('feedback_murid_(walas)'); document.getElementById('rev-val-8').innerText = Math.round(scores.h);
+                    scores.i = await fetchFB('feedback_murid_(guru_mapel)'); document.getElementById('rev-val-9').innerText = Math.round(scores.i);
+                    scores.j = await fetchFB('penilaian_teman_sejawat'); document.getElementById('rev-val-10').innerText = Math.round(scores.j);
+
+                    // FINAL CALCULATION WITH WEIGHTS
+                    let finalScore = (scores.a*(bobotKinerja.a/100)) + (scores.b*(bobotKinerja.b/100)) + (scores.c*(bobotKinerja.c/100)) + (scores.d*(bobotKinerja.d/100)) + (scores.e*(bobotKinerja.e/100)) + (scores.f*(bobotKinerja.f/100)) + (scores.g*(bobotKinerja.g/100)) + (scores.h*(bobotKinerja.h/100)) + (scores.i*(bobotKinerja.i/100)) + (scores.j*(bobotKinerja.j/100));
                     
-                    document.getElementById('rev-final-rec').innerText = "INCOMPLETE DATA"; document.getElementById('rev-final-rec').className = "text-xl font-bold text-orange-500 border-2 border-orange-500 px-4 py-1 rounded inline-block mt-2";
-                    showToast('Data Evaluasi Berhasil Dimuat.', 'success');
+                    document.getElementById('rev-final-score-val').innerText = finalScore.toFixed(2);
+                    
+                    let predicate = 'INCOMPLETE DATA'; let pColor = 'text-orange-500 border-orange-500';
+                    if(finalScore >= 86) { predicate = 'SANGAT BAIK'; pColor = 'text-neongreen border-neongreen'; }
+                    else if(finalScore >= 70) { predicate = 'BAIK'; pColor = 'text-neoncyan border-neoncyan'; }
+                    else if(finalScore >= 55) { predicate = 'CUKUP'; pColor = 'text-neonyellow border-neonyellow'; }
+                    else if(finalScore > 0) { predicate = 'KURANG'; pColor = 'text-neonpink border-neonpink'; }
+                    
+                    document.getElementById('rev-final-rec').innerText = predicate; 
+                    document.getElementById('rev-final-rec').className = `text-xl font-bold ${pColor} border-2 px-4 py-1 rounded inline-block mt-2`;
+
+                    // Fetch HR Notes
+                    document.getElementById('hr-note-target-name').innerText = "Guru: " + targetGuru;
+                    const { data: hrNote } = await supabaseClient.from('log_catatan_hr').select('*').eq('nama_guru', targetGuru).order('created_at', {ascending: false}).limit(1);
+                    document.getElementById('rev-kom-6').innerText = hrNote && hrNote.length > 0 ? hrNote[0].catatan_teks : 'Belum ada catatan khusus untuk periode ini.';
+
+                    showToast('Kalkulasi Raport Selesai.', 'success');
                 } catch (err) {
                     showToast('Gagal menarik data review', 'error'); 
+                    console.log(err);
                 }
             }
         }
