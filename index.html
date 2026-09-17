@@ -1691,6 +1691,9 @@
             }
         }
 
+       // Variabel global untuk menyimpan detail dosa absen
+        let globalMissingDetails = {};
+
         async function loadGlobalMissing() {
             const startD = document.getElementById('recap-missing-start').value;
             const endD = document.getElementById('recap-missing-end').value;
@@ -1698,12 +1701,13 @@
             
             showToast('Menganalisis anomali rentang waktu...', 'info');
             tbodyRecap.innerHTML = `<tr><td colspan="4" class="text-center py-10 italic text-muted"><i class="fas fa-circle-notch fa-spin"></i> Menghitung akumulasi data...</td></tr>`;
+            globalMissingDetails = {}; // Reset memori
             
             try {
                 // Tarik semua data yang dibutuhkan sekaligus untuk efisiensi
                 const [resLibur, resJadwal, resInfal, resCico] = await Promise.all([
                     supabaseClient.from('pengaturan_hari_libur').select('*').lte('tanggal_mulai', endD).gte('tanggal_selesai', startD),
-                    supabaseClient.from('master_jadwal').select('*'), // Tarik semua jadwal karena kita mau looping per hari
+                    supabaseClient.from('master_jadwal').select('*'), // Tarik semua jadwal
                     supabaseClient.from('data_infal').select('*').gte('tanggal', startD).lte('tanggal', endD),
                     supabaseClient.from('log_cico').select('*').gte('tanggal', startD).lte('tanggal', endD)
                 ]);
@@ -1713,29 +1717,25 @@
                 const infalData = resInfal.data || [];
                 const cicoData = resCico.data || [];
 
-                let violations = {}; // Tempat menampung dosa guru. Format: { "Nama Guru": { missIn: 0, missOut: 0 } }
+                let violations = {}; 
 
-                // Fungsi bantuan untuk ngecek apakah tanggal tertentu adalah hari libur
                 const isHoliday = (dateStr) => {
                     return liburData.some(h => dateStr >= h.tanggal_mulai && dateStr <= h.tanggal_selesai);
                 };
 
-                // Looping dari startD sampai endD (Hari demi hari)
+                // Looping hari
                 let currDate = new Date(startD);
                 let lastDate = new Date(endD);
 
                 while (currDate <= lastDate) {
-                    // Format tanggal (YYYY-MM-DD)
                     let y = currDate.getFullYear();
                     let m = String(currDate.getMonth() + 1).padStart(2, '0');
                     let d = String(currDate.getDate()).padStart(2, '0');
                     let dateStr = `${y}-${m}-${d}`;
 
-                    // Cek nama hari
                     const hariNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
                     const hariIndo = hariNames[currDate.getDay()];
 
-                    // Proses HANYA JIKA bukan hari Minggu DAN bukan Hari Libur
                     if (hariIndo !== 'Minggu' && !isHoliday(dateStr)) {
                         let daySchedules = jadwalData.filter(j => j.hari === hariIndo);
                         let dayInfals = infalData.filter(i => i.tanggal === dateStr);
@@ -1743,34 +1743,36 @@
 
                         daySchedules.forEach(j => {
                             let expectedTeacher = j.guru;
+                            let statusSource = "Jadwal Asli";
 
-                            // Cek Infal (Veto)
+                            // Cek Infal
                             let isInfal = dayInfals.find(i => i.sesi_jp === j.sesi_jp && i.id_kelas === j.kelas && i.guru_keluar === j.guru);
-                            if (isInfal) { expectedTeacher = isInfal.guru_pengganti; }
+                            if (isInfal) { 
+                                expectedTeacher = isInfal.guru_pengganti; 
+                                statusSource = "Pengganti (Infal)";
+                            }
 
-                            // Daftarkan nama guru ke buku dosa jika belum ada
                             if (!violations[expectedTeacher]) {
                                 violations[expectedTeacher] = { missIn: 0, missOut: 0 };
+                                globalMissingDetails[expectedTeacher] = [];
                             }
 
                             // Cek Mesin Scan
                             let teacherCico = dayCicos.find(c => c.nama_guru === expectedTeacher && c.sesi_jp === j.sesi_jp);
 
                             if (!teacherCico || teacherCico.waktu_in === null) {
-                                // Tidak ada data sama sekali atau lupa tap in
                                 violations[expectedTeacher].missIn += 1;
+                                globalMissingDetails[expectedTeacher].push(`[MISS IN] Tgl ${formatDate(dateStr)} - Kelas ${j.kelas} (${j.sesi_jp}) - Status: ${statusSource}`);
                             } else if (teacherCico.waktu_in !== null && teacherCico.waktu_out === null) {
-                                // Dia tap in, tapi lupa tap out
                                 violations[expectedTeacher].missOut += 1;
+                                globalMissingDetails[expectedTeacher].push(`[MISS OUT] Tgl ${formatDate(dateStr)} - Kelas ${j.kelas} (${j.sesi_jp}) - Jam Masuk: ${teacherCico.waktu_in.substring(0,5)}`);
                             }
                         });
                     }
-
-                    // Maju ke hari berikutnya
                     currDate.setDate(currDate.getDate() + 1);
                 }
 
-                // Ubah format data menjadi array, filter yang dosanya > 0, dan urutkan dari yang terbanyak
+                // Render Hasil
                 let resultArr = Object.keys(violations).map(k => ({
                     nama_guru: k,
                     total_miss_in: violations[k].missIn,
@@ -1779,18 +1781,17 @@
 
                 resultArr.sort((a, b) => (b.total_miss_in + b.total_miss_out) - (a.total_miss_in + a.total_miss_out));
 
-                // Tampilkan ke layar
                 if(resultArr.length > 0) {
                     tbodyRecap.innerHTML = resultArr.map(d => `
                         <tr class="hover:bg-orange-50 dark:hover:bg-neonyellow/10 transition-colors">
                             <td class="p-3 text-xs font-bold text-lighttext dark:text-white">${d.nama_guru}</td>
                             <td class="p-3 text-center text-red-500 font-mono font-bold">${d.total_miss_in}</td>
                             <td class="p-3 text-center text-orange-500 font-mono font-bold">${d.total_miss_out}</td>
-                            <td class="p-3 text-center"><button class="text-[10px] bg-blue-50 text-blue-600 border border-blue-200 px-2 py-1 rounded font-bold hover:bg-blue-600 hover:text-white transition">REVIEW</button></td>
+                            <td class="p-3 text-center"><button onclick="showMissingDetail('${d.nama_guru}')" class="text-[10px] bg-blue-50 text-blue-600 border border-blue-200 px-2 py-1 rounded font-bold hover:bg-blue-600 hover:text-white transition">REVIEW</button></td>
                         </tr>
                     `).join('');
                 } else {
-                    tbodyRecap.innerHTML = `<tr><td colspan="4" class="text-center py-10 italic text-green-500 font-bold"><i class="fas fa-check-circle"></i> Aman. Tidak ada guru yang lupa scan di periode ini.</td></tr>`;
+                    tbodyRecap.innerHTML = `<tr><td colspan="4" class="text-center py-10 italic text-green-500 font-bold"><i class="fas fa-check-circle"></i> Aman. Tidak ada anomali di periode ini.</td></tr>`;
                 }
 
             } catch(e) { 
@@ -1798,6 +1799,32 @@
                 tbodyRecap.innerHTML = `<tr><td colspan="4" class="text-center py-10 italic text-red-500">Error memproses perhitungan rekapan.</td></tr>`; 
             }
         }
+
+        function showMissingDetail(namaGuru) {
+            let details = globalMissingDetails[namaGuru];
+            if(!details || details.length === 0) {
+                showCustomAlert(`Tidak ada detail anomali untuk ${namaGuru}.`);
+                return;
+            }
+
+            let htmlContent = `<div class="mb-4">
+                <p class="text-xs text-muted mb-1 uppercase tracking-widest font-bold">Laporan Detail Pelanggaran</p>
+                <h3 class="text-lg font-bold text-neonpink dark:text-neonpink text-red-500">${namaGuru}</h3>
+            </div>
+            <ul class="space-y-2">`;
+            
+            details.forEach(item => {
+                let badgeClass = item.includes('[MISS IN]') ? 'bg-red-100 text-red-600 border-red-300' : 'bg-orange-100 text-orange-600 border-orange-300';
+                htmlContent += `<li class="p-3 border custom-border rounded bg-gray-50 dark:bg-[#050a15] text-xs shadow-sm flex items-start gap-3">
+                    <div class="mt-0.5"><span class="text-[8px] font-bold px-1.5 py-0.5 rounded border ${badgeClass} uppercase whitespace-nowrap">${item.includes('[MISS IN]') ? 'MISS IN' : 'MISS OUT'}</span></div>
+                    <div class="flex-1 text-lighttext dark:text-gray-300">${item.replace(/\[MISS IN\] |\[MISS OUT\] /g, '')}</div>
+                </li>`;
+            });
+            
+            htmlContent += `</ul>`;
+            showCustomAlert(htmlContent);
+        }
+        
         
         // Misi 4: Fitur CICO OFF Save
         async function saveCicoOff() {
