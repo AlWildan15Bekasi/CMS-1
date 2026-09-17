@@ -1379,26 +1379,65 @@
                     <div class="cyber-panel p-4 border-l-4 border-l-orange-500 flex flex-col justify-between"><div class="text-[9px] text-muted tracking-[0.2em] uppercase mb-2 font-bold">Class Alert</div><div class="text-3xl font-mono font-bold text-lighttext dark:text-white drop-shadow-md dark:drop-shadow-[0_0_8px_rgba(249,115,22,0.8)]">${totalTelatKelas}</div></div>
                     <div class="cyber-panel p-4 border-l-4 border-l-blue-500 dark:border-l-neonblue flex flex-col justify-between bg-blue-50 dark:bg-gradient-to-br dark:from-neonblue/10 dark:to-transparent transition-colors"><div class="text-[9px] text-blue-600 dark:text-neoncyan tracking-[0.2em] uppercase mb-2 font-bold">Active Protocol</div><div class="text-3xl font-mono font-bold text-lighttext dark:text-white neon-glow-cyan">${totalInfal} <span class="text-sm font-sans text-blue-600 dark:text-neoncyan">SES</span></div></div>`;
                 
-                // Misi 3: Donut Chart Real Updates
-                // Asumsi 1 hari efektif = jumlah guru yang ada * selisih hari
-                const dayDiff = Math.max(1, Math.round((new Date(endD) - new Date(startD)) / (1000 * 60 * 60 * 24)));
-                let maxTargetHadir = globalTeacherList.length * dayDiff;
-                if(maxTargetHadir === 0) maxTargetHadir = 100;
+                // =====================================================================
+                // 🛠️ DIFF 6: KALKULASI CERDAS KEHADIRAN HARIAN (DONUT CHART - MAX 100%)
+                // =====================================================================
+                // 1. Tarik data libur khusus rentang ini
+                const { data: dataLibur } = await supabaseClient.from('pengaturan_hari_libur').select('*').lte('tanggal_mulai', endD).gte('tanggal_selesai', startD);
+                const liburArr = dataLibur || [];
+
+                // 2. Hitung Hari Efektif (Tanpa Sabtu, Minggu & Libur Nasional)
+                let validDays = 0;
+                let currDay = new Date(startD);
+                let lastDay = new Date(endD);
                 
-                let hadirCount = totalKehadiran; 
-                let tidakHadirCount = Math.max(0, maxTargetHadir - hadirCount);
+                while(currDay <= lastDay) {
+                    let y = currDay.getFullYear();
+                    let m = String(currDay.getMonth() + 1).padStart(2, '0');
+                    let d = String(currDay.getDate()).padStart(2, '0');
+                    let dateStr = `${y}-${m}-${d}`;
+
+                    let dayOfWeek = currDay.getDay();
+                    let isWeekend = (dayOfWeek === 0 || dayOfWeek === 6); // 0 = Minggu, 6 = Sabtu
+                    let isLiburNasional = liburArr.some(l => dateStr >= l.tanggal_mulai && dateStr <= l.tanggal_selesai);
+                    
+                    // Tambah hari aktif HANYA JIKA bukan weekend dan bukan libur nasional
+                    if(!isWeekend && !isLiburNasional) {
+                        validDays++;
+                    }
+                    
+                    currDay.setDate(currDay.getDate() + 1);
+                }
+
+                // 3. Filter Scan Ganda dengan Himpunan Unik (Set)
+                let kehadiranUnik = new Set();
                 
-                document.getElementById('pct-hadir').innerText = Math.round((hadirCount / (maxTargetHadir)) * 100) + '%';
-                myChart1 = renderDonutChart('chartKehadiran', myChart1, ['Present', 'Absent'], [hadirCount, tidakHadirCount], ['#00fa9a', '#1e293b']);
+                if (absensiData && absensiData.length > 0) {
+                    absensiData.forEach(scan => {
+                        // Gabungkan Nama dan Tanggal jadi 1 kunci (Contoh: "Wahyu_2026-08-07")
+                        // Walaupun Wahyu scan 3x di tanggal 7, Set() hanya akan menghitungnya 1x hadir.
+                        let kunciHadir = `${scan.nama_guru}_${scan.tanggal}`;
+                        kehadiranUnik.add(kunciHadir);
+                    });
+                }
                 
-                let disiplinKelas = Math.max(0, totalCico - totalTelatKelas);
-                document.getElementById('pct-kelas').innerText = totalCico > 0 ? Math.round((disiplinKelas / totalCico) * 100) + '%' : '0%';
-                myChart2 = renderDonutChart('chartKelas', myChart2, ['On Time', 'Warning'], [disiplinKelas, totalTelatKelas], ['#00e5ff', '#ffaa00']);
+                // 4. Kalkulasi Persentase Final
+                let totalKehadiranRiil = kehadiranUnik.size;
+                let maxTargetHadir = globalTeacherList.length * validDays;
                 
-                // Asumsi 1 bulan rata2 ada 200 sesi ajar
-                let normalSesi = Math.max(0, (200 * dayDiff) - totalInfal); 
-                document.getElementById('pct-infal').innerText = Math.round((totalInfal / (totalInfal + normalSesi || 1)) * 100) + '%';
-                myChart3 = renderDonutChart('chartInfal', myChart3, ['Normal', 'Replaced'], [normalSesi, totalInfal], ['#0077b6', '#ffaa00']);
+                // Jika filter jatuh di hari libur semua (target 0), set minimal 1 agar tidak NaN/Error
+                if(maxTargetHadir === 0) maxTargetHadir = 1; 
+                
+                let tidakHadirCount = Math.max(0, maxTargetHadir - totalKehadiranRiil);
+                let chartPercentage = Math.round((totalKehadiranRiil / maxTargetHadir) * 100);
+                
+                // Safety Lock terakhir
+                if (chartPercentage > 100) chartPercentage = 100;
+                
+                // 5. Render ke UI
+                document.getElementById('pct-hadir').innerText = chartPercentage + '%';
+                myChart1 = renderDonutChart('chartKehadiran', myChart1, ['Present', 'Absent'], [totalKehadiranRiil, tidakHadirCount], ['#00fa9a', '#1e293b']);
+                // =====================================================================
 
                 // Misi 3: Anomali Real (Ada di jadwal, tapi tidak scan) -> Dihitung di Misi SQL, jadi sementara persentase kasar dari Telat+Infal
                 let noScanPct = totalCico > 0 ? Math.round(((totalInfal + totalTelatKelas) / totalCico) * 15) : 0; 
