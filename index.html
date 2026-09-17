@@ -1380,16 +1380,17 @@
                     <div class="cyber-panel p-4 border-l-4 border-l-blue-500 dark:border-l-neonblue flex flex-col justify-between bg-blue-50 dark:bg-gradient-to-br dark:from-neonblue/10 dark:to-transparent transition-colors"><div class="text-[9px] text-blue-600 dark:text-neoncyan tracking-[0.2em] uppercase mb-2 font-bold">Active Protocol</div><div class="text-3xl font-mono font-bold text-lighttext dark:text-white neon-glow-cyan">${totalInfal} <span class="text-sm font-sans text-blue-600 dark:text-neoncyan">SES</span></div></div>`;
                 
                 // =====================================================================
-                // 🛠️ DIFF 6: KALKULASI CERDAS KEHADIRAN HARIAN (DONUT CHART - MAX 100%)
                 // =====================================================================
-                // 1. Tarik data libur khusus rentang ini
+                // 🛠️ DIFF 6.1: KALKULASI CERDAS KEHADIRAN (PLUS RESTORE CHART 2 & 3)
+                // =====================================================================
+                // --- CHART 1: KEHADIRAN HARIAN (SMART LOGIC) ---
                 const { data: dataLibur } = await supabaseClient.from('pengaturan_hari_libur').select('*').lte('tanggal_mulai', endD).gte('tanggal_selesai', startD);
                 const liburArr = dataLibur || [];
 
-                // 2. Hitung Hari Efektif (Tanpa Sabtu, Minggu & Libur Nasional)
                 let validDays = 0;
                 let currDay = new Date(startD);
                 let lastDay = new Date(endD);
+                let dayDiff = 0; // Disiapkan untuk hitungan chart 3 nanti
                 
                 while(currDay <= lastDay) {
                     let y = currDay.getFullYear();
@@ -1401,44 +1402,39 @@
                     let isWeekend = (dayOfWeek === 0 || dayOfWeek === 6); // 0 = Minggu, 6 = Sabtu
                     let isLiburNasional = liburArr.some(l => dateStr >= l.tanggal_mulai && dateStr <= l.tanggal_selesai);
                     
-                    // Tambah hari aktif HANYA JIKA bukan weekend dan bukan libur nasional
-                    if(!isWeekend && !isLiburNasional) {
-                        validDays++;
-                    }
-                    
+                    if(!isWeekend && !isLiburNasional) validDays++;
+                    dayDiff++;
                     currDay.setDate(currDay.getDate() + 1);
                 }
 
-                // 3. Filter Scan Ganda dengan Himpunan Unik (Set)
                 let kehadiranUnik = new Set();
-                
                 if (absensiData && absensiData.length > 0) {
-                    absensiData.forEach(scan => {
-                        // Gabungkan Nama dan Tanggal jadi 1 kunci (Contoh: "Wahyu_2026-08-07")
-                        // Walaupun Wahyu scan 3x di tanggal 7, Set() hanya akan menghitungnya 1x hadir.
-                        let kunciHadir = `${scan.nama_guru}_${scan.tanggal}`;
-                        kehadiranUnik.add(kunciHadir);
-                    });
+                    absensiData.forEach(scan => { kehadiranUnik.add(`${scan.nama_guru}_${scan.tanggal}`); });
                 }
                 
-                // 4. Kalkulasi Persentase Final
                 let totalKehadiranRiil = kehadiranUnik.size;
                 let maxTargetHadir = globalTeacherList.length * validDays;
-                
-                // Jika filter jatuh di hari libur semua (target 0), set minimal 1 agar tidak NaN/Error
                 if(maxTargetHadir === 0) maxTargetHadir = 1; 
                 
                 let tidakHadirCount = Math.max(0, maxTargetHadir - totalKehadiranRiil);
                 let chartPercentage = Math.round((totalKehadiranRiil / maxTargetHadir) * 100);
-                
-                // Safety Lock terakhir
                 if (chartPercentage > 100) chartPercentage = 100;
                 
-                // 5. Render ke UI
                 document.getElementById('pct-hadir').innerText = chartPercentage + '%';
                 myChart1 = renderDonutChart('chartKehadiran', myChart1, ['Present', 'Absent'], [totalKehadiranRiil, tidakHadirCount], ['#00fa9a', '#1e293b']);
+                
+                // --- CHART 2: KEDISIPLINAN KELAS (RESTORED) ---
+                let disiplinKelas = Math.max(0, totalCico - totalTelatKelas);
+                document.getElementById('pct-kelas').innerText = totalCico > 0 ? Math.round((disiplinKelas / totalCico) * 100) + '%' : '0%';
+                myChart2 = renderDonutChart('chartKelas', myChart2, ['On Time', 'Warning'], [disiplinKelas, totalTelatKelas], ['#00e5ff', '#ffaa00']);
+                
+                // --- CHART 3: RASIO INFAL (RESTORED) ---
+                // Asumsi 1 bulan rata2 ada 200 sesi ajar (disesuaikan dengan selisih hari)
+                let normalSesi = Math.max(0, (200 * Math.max(1, dayDiff)) - totalInfal); 
+                document.getElementById('pct-infal').innerText = Math.round((totalInfal / (totalInfal + normalSesi || 1)) * 100) + '%';
+                myChart3 = renderDonutChart('chartInfal', myChart3, ['Normal', 'Replaced'], [normalSesi, totalInfal], ['#0077b6', '#ffaa00']);
                 // =====================================================================
-
+                
                 // Misi 3: Anomali Real (Ada di jadwal, tapi tidak scan) -> Dihitung di Misi SQL, jadi sementara persentase kasar dari Telat+Infal
                 let noScanPct = totalCico > 0 ? Math.round(((totalInfal + totalTelatKelas) / totalCico) * 15) : 0; 
                 document.getElementById('pct-noscan').innerText = noScanPct + '%';
