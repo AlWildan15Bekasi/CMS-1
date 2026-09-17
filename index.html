@@ -1412,16 +1412,28 @@
                     document.getElementById('dash-log-recent').innerHTML = '<div class="h-full flex items-center justify-center text-muted italic text-xs">No records found</div>';
                 }
                 
-                // Misi: Tarik data 5 besar pahlawan infal dari view_top_infal
+                // Misi: Kalkulasi 5 besar pahlawan infal langsung dari infalData (Real-time by Date Filter)
                 try {
-                    const { data } = await supabaseClient.from('view_top_infal').select('*').limit(5);
-                    if(data && data.length > 0) {
-                        document.getElementById('dash-top-infal').innerHTML = data.map(d => `<div class="flex justify-between items-center text-xs border-b border-gray-100 dark:border-gray-800 pb-2 mb-2"><span class="text-lighttext dark:text-gray-300 font-bold"><i class="fas fa-medal text-neonyellow mr-2"></i>${d.guru_pengganti}</span><span class="font-bold text-orange-600 dark:text-neonyellow bg-orange-100 dark:bg-neonyellow/20 px-2 py-0.5 rounded">${d.total_menggantikan}x Sesi</span></div>`).join('');
+                    if(infalData && infalData.length > 0) {
+                        const infalCounts = {};
+                        infalData.forEach(item => {
+                            if(item.guru_pengganti) {
+                                infalCounts[item.guru_pengganti] = (infalCounts[item.guru_pengganti] || 0) + 1;
+                            }
+                        });
+                        
+                        // Ubah object ke array, urutkan descending terbanyak, lalu ambil 5 teratas
+                        const top5 = Object.keys(infalCounts)
+                            .map(k => ({ guru_pengganti: k, total_menggantikan: infalCounts[k] }))
+                            .sort((a, b) => b.total_menggantikan - a.total_menggantikan)
+                            .slice(0, 5);
+                            
+                        document.getElementById('dash-top-infal').innerHTML = top5.map(d => `<div class="flex justify-between items-center text-xs border-b border-gray-100 dark:border-gray-800 pb-2 mb-2"><span class="text-lighttext dark:text-gray-300 font-bold"><i class="fas fa-medal text-neonyellow mr-2"></i>${d.guru_pengganti}</span><span class="font-bold text-orange-600 dark:text-neonyellow bg-orange-100 dark:bg-neonyellow/20 px-2 py-0.5 rounded">${d.total_menggantikan}x Sesi</span></div>`).join('');
                     } else {
-                        document.getElementById('dash-top-infal').innerHTML = '<div class="h-full flex items-center justify-center text-muted italic text-xs">Belum ada data infal.</div>';
+                        document.getElementById('dash-top-infal').innerHTML = '<div class="h-full flex items-center justify-center text-muted italic text-xs">Belum ada data infal di periode ini.</div>';
                     }
                 } catch(e) { 
-                    document.getElementById('dash-top-infal').innerHTML = '<div class="h-full flex items-center justify-center text-red-500 italic text-xs">Error narik data SQL.</div>'; 
+                    document.getElementById('dash-top-infal').innerHTML = '<div class="h-full flex items-center justify-center text-red-500 italic text-xs">Error kalkulasi data.</div>'; 
                 }
                 
                 if(!silent) showToast('Analytics Refreshed', 'success');
