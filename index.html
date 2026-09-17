@@ -1598,26 +1598,97 @@
         }
 
         async function loadMissingCICO(silent = false) {
-            const startD = document.getElementById('missing-date').value;
-            const kelas = document.getElementById('missing-kelas').value;
-            const jp = document.getElementById('missing-jp').value;
+            const targetDate = document.getElementById('missing-date').value;
+            const targetKelas = document.getElementById('missing-kelas').value;
+            const targetJp = document.getElementById('missing-jp').value;
             const tbody = document.getElementById('table-cico-missing-body');
             
-            if(!silent) showToast('Scanning Missing Teachers...', 'info');
-            tbody.innerHTML = `<tr><td colspan="4" class="text-center py-8 italic text-muted"><i class="fas fa-spinner fa-spin"></i> Fetching from SQL View...</td></tr>`;
+            if(!silent) showToast('Menganalisis Jadwal vs Mesin...', 'info');
+            tbody.innerHTML = `<tr><td colspan="4" class="text-center py-8 italic text-muted"><i class="fas fa-spinner fa-spin"></i> Cross-checking data...</td></tr>`;
             
             try {
-                let query = supabaseClient.from('view_missing_cico').select('*').eq('tanggal', startD);
-                if(kelas !== 'ALL') query = query.eq('kelas', kelas);
-                if(jp !== 'ALL') query = query.eq('sesi_jp', jp);
-                
-                const { data, error } = await query;
-                if(data && data.length > 0) {
-                    tbody.innerHTML = data.map(d => `<tr class="hover:bg-red-50 dark:hover:bg-neonpink/10 transition-colors"><td class="p-3 text-center"><span class="text-[9px] bg-red-100 text-red-600 border border-red-300 px-2 py-0.5 rounded font-bold uppercase">MISSING</span></td><td class="p-3 text-xs font-bold text-lighttext dark:text-white">${d.guru}</td><td class="p-3 text-xs text-center font-bold text-red-500">${d.kelas} <span class="text-muted text-[10px] ml-1">(${d.sesi_jp})</span></td><td class="p-3 text-center text-[10px] italic text-muted">Jadwal Aktif</td></tr>`).join('');
-                } else {
-                    tbody.innerHTML = `<tr><td colspan="4" class="text-center py-8 italic text-green-500 font-bold"><i class="fas fa-check-circle"></i> Clear! Tidak ada anomali (Missing) hari ini.</td></tr>`;
+                // TAHAP 1: Cek Hari Libur
+                const { data: holidays } = await supabaseClient.from('pengaturan_hari_libur')
+                    .select('*')
+                    .lte('tanggal_mulai', targetDate)
+                    .gte('tanggal_selesai', targetDate);
+
+                if (holidays && holidays.length > 0) {
+                    tbody.innerHTML = `<tr><td colspan="4" class="text-center py-8 italic text-green-500 font-bold"><i class="fas fa-umbrella-beach"></i> Clear! Hari ini libur (${holidays[0].keterangan}).</td></tr>`;
+                    return;
                 }
-            } catch(e) { tbody.innerHTML = `<tr><td colspan="4" class="text-center py-8 italic text-red-500">Error fetching view.</td></tr>`; }
+
+                // Cari tahu nama hari (Senin-Minggu)
+                let [y, m, d] = targetDate.split('-'); 
+                let dObj = new Date(y, m-1, d);
+                const hariNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+                const hariIndo = hariNames[dObj.getDay()];
+
+                if (hariIndo === 'Minggu') {
+                    tbody.innerHTML = `<tr><td colspan="4" class="text-center py-8 italic text-green-500 font-bold"><i class="fas fa-check-circle"></i> Clear! Hari Minggu tidak ada jadwal.</td></tr>`;
+                    return;
+                }
+
+                // TAHAP 2: Tarik Data Mentah (Jadwal, Infal, CICO)
+                let queryJadwal = supabaseClient.from('master_jadwal').select('*').eq('hari', hariIndo);
+                if (targetJp !== 'ALL') queryJadwal = queryJadwal.eq('sesi_jp', targetJp);
+                if (targetKelas !== 'ALL') queryJadwal = queryJadwal.eq('kelas', targetKelas);
+                
+                const [resJadwal, resInfal, resCico] = await Promise.all([
+                    queryJadwal,
+                    supabaseClient.from('data_infal').select('*').eq('tanggal', targetDate),
+                    supabaseClient.from('log_cico').select('*').eq('tanggal', targetDate)
+                ]);
+
+                const jadwalData = resJadwal.data || [];
+                const infalData = resInfal.data || [];
+                const cicoData = resCico.data || [];
+
+                if (jadwalData.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="4" class="text-center py-8 italic text-green-500 font-bold"><i class="fas fa-check-circle"></i> Clear! Tidak ada jadwal terdaftar.</td></tr>`;
+                    return;
+                }
+
+                // TAHAP 3 & 4: Investigasi & Silang Data
+                let missingList = [];
+
+                jadwalData.forEach(j => {
+                    let expectedTeacher = j.guru;
+                    let statusSource = "Jadwal Aktif";
+
+                    // Cek apakah guru asli digantikan (Infal)
+                    let isInfal = infalData.find(i => i.sesi_jp === j.sesi_jp && i.id_kelas === j.kelas && i.guru_keluar === j.guru);
+                    if (isInfal) {
+                        expectedTeacher = isInfal.guru_pengganti; // Hak Veto Aktif!
+                        statusSource = "Pengganti (Infal)";
+                    }
+
+                    // Cek di mesin scan CICO (Apakah si expectedTeacher udah nge-tap In?)
+                    let hasScan = cicoData.find(c => c.nama_guru === expectedTeacher && c.sesi_jp === j.sesi_jp && c.waktu_in !== null);
+
+                    if (!hasScan) {
+                        missingList.push({ guru: expectedTeacher, kelas: j.kelas, sesi_jp: j.sesi_jp, sumber: statusSource });
+                    }
+                });
+
+                // Render Hasil Investigasi
+                if (missingList.length > 0) {
+                    tbody.innerHTML = missingList.map(m => `
+                        <tr class="hover:bg-red-50 dark:hover:bg-neonpink/10 transition-colors">
+                            <td class="p-3 text-center"><span class="text-[9px] bg-red-100 text-red-600 border border-red-300 px-2 py-0.5 rounded font-bold uppercase">MISSING</span></td>
+                            <td class="p-3 text-xs font-bold text-lighttext dark:text-white">${m.guru}</td>
+                            <td class="p-3 text-xs text-center font-bold text-red-500">${m.kelas} <span class="text-muted text-[10px] ml-1">(${m.sesi_jp})</span></td>
+                            <td class="p-3 text-center text-[10px] italic text-muted">${m.sumber}</td>
+                        </tr>
+                    `).join('');
+                } else {
+                    tbody.innerHTML = `<tr><td colspan="4" class="text-center py-8 italic text-green-500 font-bold"><i class="fas fa-check-circle"></i> Clear! Tidak ada anomali hari ini.</td></tr>`;
+                }
+
+            } catch(e) { 
+                console.error("Error Missing CICO:", e);
+                tbody.innerHTML = `<tr><td colspan="4" class="text-center py-8 italic text-red-500">Error memproses data investigasi.</td></tr>`; 
+            }
         }
 
         async function loadGlobalMissing() {
