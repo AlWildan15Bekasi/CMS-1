@@ -1061,7 +1061,8 @@
         }
 
         function showCustomAlert(message) {
-            document.getElementById('custom-alert-message').innerText = message;
+            // Ubah dari innerText ke innerHTML agar tag styling terbaca sebagai desain, bukan teks mentah
+            document.getElementById('custom-alert-message').innerHTML = message; 
             openModal('custom-alert-modal');
         }
 
