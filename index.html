@@ -2748,16 +2748,59 @@
                 </table>
             </div>`;
         }
-        
         function buildRekapMissingPDF(areaEl) {
             const startD = document.getElementById('recap-missing-start').value;
             const endD = document.getElementById('recap-missing-end').value;
-            const tbodyData = document.getElementById('table-cico-recap-missing-body').innerHTML;
-            
             let printDate = new Date().toLocaleDateString('id-ID', {day:'numeric', month:'long', year:'numeric'});
-            // Sesuaikan warna teks di tabel agar hitam saat diprint (menimpa mode dark)
-            const printReadyTbody = tbodyData.replace(/<td/g, '<td style="color: #000 !important; border: 1px solid #ccc; padding: 8px;"');
 
+            // Ambil data baris dari tabel layar
+            const tbody = document.getElementById('table-cico-recap-missing-body');
+            const rows = tbody.querySelectorAll('tr');
+            let printReadyTbody = '';
+
+            // Cek jika tabel kosong / pesan aman
+            if (rows.length === 0 || (rows.length === 1 && rows[0].cells.length === 1)) {
+                printReadyTbody = `<tr><td colspan="3" style="color: #000 !important; border: 1px solid #ccc; padding: 15px; text-align: center; font-style: italic;">Aman. Tidak ada guru yang lupa scan di periode ini.</td></tr>`;
+            } else {
+                rows.forEach(tr => {
+                    // Pastikan baris tersebut adalah data guru (minimal 3 sel)
+                    if (tr.cells.length >= 3) {
+                        let namaGuru = tr.cells[0].innerText.trim();
+                        let missIn = tr.cells[1].innerText.trim();
+                        let missOut = tr.cells[2].innerText.trim();
+
+                        // Gambar baris utama (Nama & Total Dosa)
+                        printReadyTbody += `
+                        <tr>
+                            <td style="color: #000 !important; border: 1px solid #ccc; padding: 8px; font-weight: bold; background-color: #f8fafc;">${namaGuru}</td>
+                            <td style="color: #b91c1c !important; border: 1px solid #ccc; padding: 8px; text-align: center; font-weight: bold; font-family: monospace; font-size: 14px; background-color: #f8fafc;">${missIn}</td>
+                            <td style="color: #ea580c !important; border: 1px solid #ccc; padding: 8px; text-align: center; font-weight: bold; font-family: monospace; font-size: 14px; background-color: #f8fafc;">${missOut}</td>
+                        </tr>`;
+
+                        // Gambar baris ekstra untuk Detail (jika ada di memori)
+                        let details = globalMissingDetails[namaGuru];
+                        if (details && details.length > 0) {
+                            let detailList = details.map(d => {
+                                let text = d.replace(/\[MISS IN\] |\[MISS OUT\] /g, '');
+                                let type = d.includes('[MISS IN]') ? '<b style="color: #b91c1c;">[MISS IN]</b>' : '<b style="color: #ea580c;">[MISS OUT]</b>';
+                                return `<li style="margin-bottom: 4px;">${type} ${text}</li>`;
+                            }).join('');
+                            
+                            printReadyTbody += `
+                            <tr>
+                                <td colspan="3" style="color: #333 !important; border: 1px solid #ccc; padding: 8px 12px 12px 24px; font-size: 10px;">
+                                    <p style="margin: 0 0 6px 0; font-weight: bold; text-transform: uppercase; font-size: 9px; color: #666 !important; letter-spacing: 1px;">Rincian Anomali / Pelanggaran:</p>
+                                    <ul style="margin: 0; padding-left: 16px;">
+                                        ${detailList}
+                                    </ul>
+                                </td>
+                            </tr>`;
+                        }
+                    }
+                });
+            }
+
+            // Kerangka PDF Utamanya
             areaEl.innerHTML = `
             <div class="a4-page bg-white p-[15mm]">
                 <div class="flex items-center justify-between border-b-[4px] border-[#001b94] pb-4 mb-6">
@@ -2786,10 +2829,9 @@
                 <table class="w-full border-collapse text-xs mb-8">
                     <thead>
                         <tr class="bg-[#b91c1c] text-white">
-                            <th class="p-2 text-left border border-gray-400" style="color: white !important;">Nama Guru</th>
-                            <th class="p-2 text-center border border-gray-400" style="color: white !important;">Miss IN (Lupa Masuk)</th>
-                            <th class="p-2 text-center border border-gray-400" style="color: white !important;">Miss OUT (Lupa Keluar)</th>
-                            <th class="p-2 text-center border border-gray-400" style="color: white !important;">Tindakan / Aksi</th>
+                            <th class="p-2 text-left border border-gray-400" style="color: white !important;">Nama Guru & Rincian</th>
+                            <th class="p-2 text-center border border-gray-400 w-24" style="color: white !important;">Total Miss IN</th>
+                            <th class="p-2 text-center border border-gray-400 w-24" style="color: white !important;">Total Miss OUT</th>
                         </tr>
                     </thead>
                     <tbody style="color: #000 !important;">
@@ -2797,7 +2839,7 @@
                     </tbody>
                 </table>
                 <div class="mt-8 pt-8 border-t border-gray-300">
-                    <p class="text-[10px] italic" style="color: #666 !important;">* Catatan: Laporan ini digenerate secara otomatis oleh sistem CICO Radar berdasarkan data silang dengan jadwal kelas aktif. Data ini otentik dan ditarik langsung dari Supabase.</p>
+                    <p class="text-[10px] italic" style="color: #666 !important;">* Catatan: Laporan ini dicetak otomatis oleh sistem CICO Radar berdasarkan persilangan data jadwal kelas aktif dan log mesin biometrik. Bukti pelanggaran rill ditarik dari database.</p>
                 </div>
             </div>`;
         }
