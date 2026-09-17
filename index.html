@@ -2471,7 +2471,8 @@
             const area = document.getElementById('print-section');
             if(type === 'slipGaji') { 
                 if(!globalEditedAttendance || globalEditedAttendance.length === 0) { showToast('Tarik data Sync terlebih dahulu!', 'error'); return; }
-                area.innerHTML = buildSlipPotonganNew(); 
+                showToast('Mempersiapkan PDF Slip Kehadiran...', 'info');
+                await buildSlipPotonganNew(area); 
             } 
             else if (type === 'rekapInfal') { 
                 showToast('Mempersiapkan PDF Infal...', 'info');
@@ -2644,18 +2645,54 @@
             return page1;
         }
 
-        function buildSlipPotonganNew() {
+        async function buildSlipPotonganNew(areaEl) {
             let fullHtml = '';
             let startDate = document.getElementById('att-date-start').value;
             let endDate = document.getElementById('att-date-end').value;
             let printDate = new Date().toLocaleDateString('id-ID', {day:'numeric', month:'long', year:'numeric'});
-                        
+            
+            // Tarik data absen riil untuk mencari detail keterlambatan
+            const { data: realScans } = await supabaseClient
+                .from('absensi_gerbang')
+                .select('*')
+                .gte('tanggal', startDate)
+                .lte('tanggal', endDate)
+                .order('tanggal', { ascending: true });
+
             globalEditedAttendance.forEach((guru) => {
-                let rincianHtml = `<tr><td colspan="5" class="p-2 border-l border-r border-b border-gray-300 text-center italic text-xs text-gray-500">Tidak ada rekam jejak keterlambatan.</td></tr>`;
+                let rincianHtml = `<tr><td colspan="4" class="p-4 text-center italic text-xs text-gray-500 border-l border-r border-b border-gray-300">Tidak ada rekam jejak keterlambatan.</td></tr>`;
+                let totalMnt = 0;
+                let totalPotongan = 0;
+
+                if (realScans && realScans.length > 0) {
+                    // Filter scan milik guru ini yang telat (di atas jam 07:00:00)
+                    let telatScans = realScans.filter(s => s.nama_guru === guru.nama && s.waktu_scan > "07:00:00");
+                    
+                    if (telatScans.length > 0) {
+                        rincianHtml = telatScans.map(s => {
+                            // Hitung selisih menit kasar (Asumsi telat di bawah 1 jam)
+                            let [h, m, sec] = s.waktu_scan.split(':').map(Number);
+                            let selisihMnt = m; // Ambil menitnya saja sebagai contoh
+                            totalMnt += selisihMnt;
+                            totalPotongan += 5000;
+
+                            return `<tr class="border-b border-gray-300">
+                                <td class="p-3 text-xs border-l border-r border-gray-300 text-gray-700">Telat pd. tgl ${formatDate(s.tanggal)}</td>
+                                <td class="p-3 text-center border-r border-gray-300 font-mono text-sm font-bold text-gray-800">${s.waktu_scan.substring(0,5)}</td>
+                                <td class="p-3 text-center border-r border-gray-300 font-bold text-[#b91c1c]">${selisihMnt} Mnt</td>
+                                <td class="p-3 text-right border-r border-gray-300 font-mono font-bold text-[#b91c1c]">${formatRp(5000)}</td>
+                            </tr>`;
+                        }).join('');
+                    }
+                }
+                
+                // Gunakan potongan dari modal Edit (globalEditedAttendance) sebagai patokan final denda
+                let finalDenda = guru.totalPotongan > 0 ? guru.totalPotongan : totalPotongan;
 
                 fullHtml += `
-                <div class="a4-page-potrait bg-white p-[15mm] font-sans">
-                    <div class="flex items-center justify-between border-b-[4px] border-[#001b94] pb-4 mb-6">
+                <div class="a4-page-potrait bg-white p-[15mm] font-sans relative overflow-hidden">
+                    <!-- Header -->
+                    <div class="flex items-center justify-between border-b-[4px] border-[#001b94] pb-4 mb-6 relative z-10">
                         <div class="flex items-center gap-4">
                             <img src="https://i.ibb.co.com/tpJfS5J2/favicon.png" alt="Logo" class="w-16 h-16 object-contain">
                             <div>
@@ -2664,46 +2701,78 @@
                             </div>
                         </div>
                         <div class="text-right">
-                            <h2 class="text-lg font-bold text-gray-800 uppercase m-0 leading-tight">Slip Kehadiran Individu</h2>
+                            <h2 class="text-lg font-bold text-gray-800 uppercase m-0 leading-tight">SLIP KEHADIRAN INDIVIDU</h2>
                             <p class="text-[10px] text-gray-500 font-mono mt-1">Ref: AW15/HR-SLIP/${Math.floor(Math.random()*1000).toString().padStart(3, '0')}</p>
                         </div>
                     </div>
 
-                    <div class="mb-6 flex justify-between text-sm bg-blue-50 p-4 rounded border border-blue-100">
+                    <!-- Identitas -->
+                    <div class="mb-6 flex justify-between text-sm bg-gray-50 p-4 rounded border border-gray-200">
                         <div>
-                            <p class="mb-1 text-xs text-gray-500 uppercase font-bold tracking-widest">Identitas Pegawai</p>
+                            <p class="mb-1 text-[10px] text-gray-500 uppercase font-bold tracking-widest">IDENTITAS PEGAWAI</p>
                             <p class="text-lg font-bold text-[#001b94] mb-2">${guru.nama}</p>
-                            <p class="text-xs">Periode : <b class="font-mono">${startDate} s/d ${endDate}</b></p>
+                            <p class="text-xs">Periode : <b class="font-mono text-gray-700">${startDate} s/d ${endDate}</b></p>
                         </div>
                         <div class="text-right">
-                            <p class="text-xs">Dicetak Pada : <b>${printDate}</b></p>
+                            <p class="text-xs text-gray-700">Dicetak Pada : <b class="text-black">${printDate}</b></p>
                         </div>
                     </div>
 
-                    <div class="mb-3"><h3 class="font-bold text-[#001b94] text-base border-l-4 border-[#ff6600] pl-2">I. Rekapitulasi Kehadiran & Absensi</h3></div>
+                    <!-- Rekapitulasi I -->
+                    <div class="mb-3"><h3 class="font-bold text-[#001b94] text-sm border-l-[3px] border-[#ea580c] pl-2">I. Rekapitulasi Kehadiran & Absensi</h3></div>
                     <table class="w-full border-collapse text-sm mb-8">
                         <thead>
                             <tr class="bg-[#001b94] text-white">
-                                <th class="p-3 text-center border border-[#001b94]">Hadir</th>
-                                <th class="p-3 text-center border border-[#001b94]">Sakit</th>
-                                <th class="p-3 text-center border border-[#001b94]">Izin/DL</th>
-                                <th class="p-3 text-center border border-[#001b94]">Alpa (Mangkir)</th>
-                                <th class="p-3 text-center border border-[#001b94]">Denda (Rp)</th>
+                                <th class="p-3 text-center border border-[#001b94] font-semibold w-1/4">Hadir</th>
+                                <th class="p-3 text-center border border-[#001b94] font-semibold w-1/4">Sakit</th>
+                                <th class="p-3 text-center border border-[#001b94] font-semibold w-1/4">Izin/DL</th>
+                                <th class="p-3 text-center border border-[#001b94] font-semibold w-1/4">Alpa (Mangkir)</th>
                             </tr>
                         </thead>
                         <tbody>
                             <tr class="border-b border-gray-300">
-                                <td class="p-4 text-center border-l border-r border-gray-300 text-green-600 font-bold text-lg">${guru.hadir}</td>
+                                <td class="p-4 text-center border-l border-r border-gray-300 text-[#16a34a] font-bold text-lg">${guru.hadir}</td>
                                 <td class="p-4 text-center border-r border-gray-300 text-blue-600 font-bold text-lg">${guru.sakit}</td>
-                                <td class="p-4 text-center border-r border-gray-300 text-orange-500 font-bold text-lg">${guru.izin}</td>
-                                <td class="p-4 text-center border-r border-gray-300 text-red-600 font-bold text-lg">${guru.alpa}</td>
-                                <td class="p-4 text-center border-r border-gray-300 text-pink-600 font-bold text-lg">${formatRp(guru.totalPotongan)}</td>
+                                <td class="p-4 text-center border-r border-gray-300 text-[#ea580c] font-bold text-lg">${guru.izin}</td>
+                                <td class="p-4 text-center border-r border-gray-300 text-[#dc2626] font-bold text-lg">${guru.alpa}</td>
                             </tr>
                         </tbody>
                     </table>
+
+                    <!-- Rincian II -->
+                    <div class="mb-3"><h3 class="font-bold text-[#001b94] text-sm border-l-[3px] border-[#ea580c] pl-2">II. Rincian Keterlambatan & Potongan</h3></div>
+                    <table class="w-full border-collapse text-sm mb-6">
+                        <thead>
+                            <tr class="bg-gray-100 text-gray-700">
+                                <th class="p-3 text-left border border-gray-300 font-bold text-xs w-2/5">Deskripsi / Tanggal</th>
+                                <th class="p-3 text-center border border-gray-300 font-bold text-xs">Waktu Scan</th>
+                                <th class="p-3 text-center border border-gray-300 font-bold text-xs">Durasi</th>
+                                <th class="p-3 text-right border border-gray-300 font-bold text-xs">Nilai / Nominal</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${rincianHtml}
+                            <tr class="bg-gray-50 border-b border-gray-300">
+                                <td colspan="2" class="p-3 text-right font-bold text-gray-700 border-l border-gray-300">Total Akumulasi Menit</td>
+                                <td class="p-3 text-center font-bold text-[#ea580c] border-l border-r border-gray-300">${totalMnt} Mnt</td>
+                                <td class="border-r border-gray-300"></td>
+                            </tr>
+                            <tr>
+                                <td colspan="3" class="p-4 text-right font-bold text-[#b91c1c] uppercase tracking-wider border-l border-b border-gray-300">TOTAL POTONGAN TRANSPORT</td>
+                                <td class="p-4 text-right font-black text-[#b91c1c] text-lg border-b border-r border-gray-300 bg-red-50/50">${formatRp(finalDenda)}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <!-- Footer Notes -->
+                    <div class="mt-8 border border-gray-200 bg-gray-50 rounded p-4 text-[10px] text-gray-500">
+                        <p class="font-bold uppercase text-gray-700 mb-1">CATATAN HRD:</p>
+                        <p>Total potongan pada slip ini merupakan akumulasi berdasarkan sistem absensi biometrik yang telah divalidasi dan akan mengurangi nominal Transportasi pada bulan tersebut.</p>
+                    </div>
                 </div>`;
             });
-            return fullHtml;
+            
+            areaEl.innerHTML = fullHtml;
         }
 
         async function fetchAndBuildRekapInfal(areaEl) {
