@@ -775,14 +775,14 @@
                             <div class="w-10 h-10 rounded-full bg-blue-500/20 flex items-center justify-center border border-blue-500/50"><i class="fas fa-file-invoice text-blue-500 text-lg"></i></div>
                             <div><h2 class="text-xl font-bold text-lighttext dark:text-white tracking-widest uppercase">Performance Review</h2><p class="text-[10px] text-blue-500 tracking-widest font-bold">Individual Teacher Report</p></div>
                         </div>
-                        <div class="flex gap-2 items-center">
-                            <div class="w-48 md:w-64"><select id="review-teacher-select" class="input-cyber w-full global-teacher-dropdown font-bold text-xs" onchange="loadPerformanceReview()"><option value="">-- Select Target --</option></select></div>
-                            
-                            <!-- NEW BOBOT BUTTON -->
-                            <button onclick="openModal('bobot-modal')" class="btn-outline-cyber px-4 h-10 text-xs font-bold tracking-widest uppercase flex items-center gap-2"><i class="fas fa-balance-scale"></i> Bobot</button>
-                            
-                            <button onclick="printPDF('perfReview')" id="btn-print-review" class="btn-outline-cyber px-4 h-10 text-xs font-bold tracking-widest uppercase flex items-center gap-2 opacity-50 cursor-not-allowed" disabled><i class="fas fa-print"></i> Export</button>
-                        </div>
+                       <div class="flex gap-2 items-center">
+                                <div class="w-48 md:w-64"><select id="review-teacher-select" class="input-cyber w-full global-teacher-dropdown font-bold text-xs" onchange="loadPerformanceReview()"><option value="">-- Select Target --</option></select></div>
+                                
+                                <!-- NEW BOBOT BUTTON -->
+                                <button onclick="openBobotModal()" class="btn-outline-cyber px-4 h-10 text-xs font-bold tracking-widest uppercase flex items-center gap-2"><i class="fas fa-balance-scale"></i> Bobot</button>
+                                
+                                <button onclick="printPDF('perfReview')" id="btn-print-review" class="btn-outline-cyber px-4 h-10 text-xs font-bold tracking-widest uppercase flex items-center gap-2 opacity-50 cursor-not-allowed" disabled><i class="fas fa-print"></i> Export</button>
+                            </div>
                     </div>
 
                     <div class="cyber-panel p-6 min-h-[60vh] relative" id="review-report-container">
@@ -1045,6 +1045,7 @@
         let globalEditedAttendance = []; 
         let currentActiveModules = []; 
         let globalMasterJadwal = []; 
+        let bobotKinerja = { a:10, b:10, c:10, d:10, e:10, f:10, g:10, h:10, i:10, j:10 };
 
         const formatRp = (num) => { if(!num) return 'Rp0'; return 'Rp' + Number(num).toLocaleString('id-ID'); };
 
@@ -1638,6 +1639,7 @@
         }
 
         // Misi 5: Fetch & Save Bobot Kinerja
+       // Misi 5: Fetch & Save Bobot Kinerja
         async function fetchBobotKinerja() {
             try {
                 const { data } = await supabaseClient.from('pengaturan_bobot_kinerja').select('*').eq('id', 1).single();
@@ -1645,6 +1647,13 @@
                     bobotKinerja = { a:data.bobot_a||10, b:data.bobot_b||10, c:data.bobot_c||10, d:data.bobot_d||10, e:data.bobot_e||10, f:data.bobot_f||10, g:data.bobot_g||10, h:data.bobot_h||10, i:data.bobot_i||10, j:data.bobot_j||10 };
                 }
             } catch(e) { console.log('Gagal fetch bobot, pakai default 10%', e); }
+        }
+
+        async function openBobotModal() {
+            showToast('Loading pengaturan bobot...', 'info');
+            await fetchBobotKinerja();
+            renderBobotInputs();
+            openModal('bobot-modal');
         }
 
         function renderBobotInputs() {
@@ -2395,7 +2404,7 @@
                     scores.f = countF > 0 ? (totalF/countF) : 0;
                     document.getElementById('rev-val-6').innerText = Math.round(scores.f);
 
-                    // Misi 7: G, H, I, J (Feedback Pulls) - DIUBAH NAMA TABELNYA AGAR TIDAK CRASH
+                    // Misi 7: G, H, I, J (Feedback Pulls) - MENGGUNAKAN KURUNG SESUAI DATABASE SUPABASE
                     const fetchFB = async (table) => { 
                         try {
                             const { data, error } = await supabaseClient.from(table).select('total_skor').eq('nama_guru', targetGuru); 
@@ -2406,9 +2415,13 @@
                             return 0; // Return 0 dengan aman agar proses G-J tidak terhenti
                         }
                     };
-                    scores.g = await fetchFB('feedback_walimurid_walas'); document.getElementById('rev-val-7').innerText = Math.round(scores.g);
-                    scores.h = await fetchFB('feedback_murid_walas'); document.getElementById('rev-val-8').innerText = Math.round(scores.h);
-                    scores.i = await fetchFB('feedback_murid_guru_mapel'); document.getElementById('rev-val-9').innerText = Math.round(scores.i);
+                    
+                    // Pastikan tarik bobot Kinerja sebelum menghitung final
+                    await fetchBobotKinerja();
+
+                    scores.g = await fetchFB('feedback_walimurid_(walas)'); document.getElementById('rev-val-7').innerText = Math.round(scores.g);
+                    scores.h = await fetchFB('feedback_murid_(walas)'); document.getElementById('rev-val-8').innerText = Math.round(scores.h);
+                    scores.i = await fetchFB('feedback_murid_(guru_mapel)'); document.getElementById('rev-val-9').innerText = Math.round(scores.i);
                     scores.j = await fetchFB('penilaian_teman_sejawat'); document.getElementById('rev-val-10').innerText = Math.round(scores.j);
 
                     // FINAL CALCULATION WITH WEIGHTS
@@ -2425,10 +2438,14 @@
                     document.getElementById('rev-final-rec').innerText = predicate; 
                     document.getElementById('rev-final-rec').className = `text-xl font-bold ${pColor} border-2 px-4 py-1 rounded inline-block mt-2`;
 
-                    // Fetch HR Notes
+                    // Fetch HR Notes - Diubah pakai ilike agar case-insensitive dan kebal periode error
                     document.getElementById('hr-note-target-name').innerText = "Guru: " + targetGuru;
-                    const { data: hrNote } = await supabaseClient.from('log_catatan_hr').select('*').eq('nama_guru', targetGuru).order('created_at', {ascending: false}).limit(1);
-                    document.getElementById('rev-kom-6').innerText = hrNote && hrNote.length > 0 ? hrNote[0].catatan_teks : 'Belum ada catatan khusus untuk periode ini.';
+                    const { data: hrNote } = await supabaseClient.from('log_catatan_hr').select('*').ilike('nama_guru', targetGuru).order('created_at', {ascending: false}).limit(1);
+                    if (hrNote && hrNote.length > 0) {
+                        document.getElementById('rev-kom-6').innerText = hrNote[0].catatan_teks;
+                    } else {
+                        document.getElementById('rev-kom-6').innerText = 'Belum ada catatan khusus untuk guru ini.';
+                    }
 
                     showToast('Kalkulasi Raport Selesai.', 'success');
                 } catch (err) {
